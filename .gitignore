@@ -1,0 +1,75 @@
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Browser automation session data (Playwright MCP, AgentCore Browser)
+.playwright-mcp/
+.agentcore-browser/
+
+# Dependencies
+node_modules/
+.npm
+.yarn/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Build outputs
+dist/
+build/
+*.zip
+
+# AWS
+.aws/
+aws-exports.js
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+
+# Scratch/reference code
+scratch.internal/
+
+# Playwright MCP (replaced by AgentCore Browser Tool)
+.playwright-mcp/
+
+# Generated diagrams and screenshots
+generated-diagrams/
+
+# Video / large binary media — keep out of git
+*.mp4
+*.mov
+*.webm
+
+# Test artifacts
+tests/audit-report.json
+tests/browser-*.xml
+log.txt
+deploy/*/govuk-built.css
+tests/sample-questions-report.internal.*

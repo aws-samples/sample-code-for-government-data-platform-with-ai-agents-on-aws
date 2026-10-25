@@ -1,0 +1,50 @@
+{% extends "layout.html" %}
+{% block title %}Attribution — Ask Your Neighbourhood{% endblock %}
+{% block content %}
+<h1 class="govuk-heading-l">Data sources and attribution</h1>
+<p class="govuk-body">
+  Every answer, chart and map on this service reproduces data that UK public bodies publish under the
+  <a class="govuk-link" href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/" rel="license">Open Government Licence v3.0</a>.
+  The licence asks us to acknowledge each source and carry any attribution statement its provider specifies. Those statements are listed here.
+</p>
+
+<h2 class="govuk-heading-m">Maps and geography</h2>
+<p class="govuk-body">
+  Council boundaries, centroids and the postcode lookup come from the
+  <a class="govuk-link" href="https://geoportal.statistics.gov.uk/" target="_blank" rel="noopener noreferrer">ONS Open Geography Portal</a>, which builds on Ordnance Survey and Royal Mail data.
+</p>
+<ul class="govuk-list">
+  <li>Source: Office for National Statistics licensed under the Open Government Licence v.3.0</li>
+  <li>Contains OS data © Crown copyright and database right {{ year }}</li>
+  <li>Contains Royal Mail data © Royal Mail copyright and database right {{ year }}</li>
+</ul>
+
+<h2 class="govuk-heading-m">Datasets</h2>
+{% if sources | length == 0 %}
+<p class="govuk-body">No data sources have been loaded yet.</p>
+{% else %}
+<p class="govuk-body">{{ sources | length }} sources are loaded. Where a publisher specifies no wording of its own, the licence's default applies: contains public sector information licensed under the Open Government Licence v3.0.</p>
+<table class="govuk-table govuk-!-font-size-16">
+  <thead class="govuk-table__head">
+    <tr class="govuk-table__row">
+      <th class="govuk-table__header" scope="col">Source</th>
+      <th class="govuk-table__header" scope="col">Publisher</th>
+      <th class="govuk-table__header" scope="col">Attribution</th>
+    </tr>
+  </thead>
+  <tbody class="govuk-table__body">
+    {% for s in sources %}
+    <tr class="govuk-table__row">
+      <td class="govuk-table__cell">
+        {% if s.api_url %}<a href="{{ s.api_url }}" class="govuk-link" target="_blank" rel="noopener noreferrer">{{ s.name }}</a>{% else %}{{ s.name }}{% endif %} {# nosemgrep: template-href-var — URL from trusted DynamoDB data source registry, not user input #}
+      </td>
+      <td class="govuk-table__cell">{{ s.department }}</td>
+      <td class="govuk-table__cell">
+        {% for line in s.attribution %}{{ line }}{% if not loop.last %}<br>{% endif %}{% endfor %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

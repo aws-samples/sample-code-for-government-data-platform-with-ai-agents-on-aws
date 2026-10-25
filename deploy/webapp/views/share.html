@@ -1,0 +1,107 @@
+{% extends "layout.html" %}
+
+{% block title %}Shared Answer — Ask Your Neighbourhood{% endblock %}
+
+{% block content %}
+{% if notFound %}
+<h1 class="govuk-heading-l">Answer not found</h1>
+<p class="govuk-body">This shared answer may have expired or the link may be incorrect.</p>
+<a href="/" class="govuk-link">Ask a new question</a>
+{% else %}
+<style>
+  .share-layout { max-width: 960px; }
+  .share-response { font-family: arial, sans-serif; font-size: 19px; line-height: 1.5; }
+  .share-response h1, .share-response h2, .share-response h3 { font-weight: 700; }
+  .share-response p { margin-bottom: 15px; }
+  .share-response ul, .share-response ol { margin-bottom: 15px; padding-left: 20px; }
+  .share-response table { border-collapse: collapse; width: 100%; margin-bottom: 20px; font-size: 16px; }
+  .share-response th, .share-response td { border: 1px solid #b1b4b6; padding: 10px; text-align: left; }
+  .share-response th { background: #f3f2f1; font-weight: 700; }
+  .chat-visual { max-width: 700px; margin: 20px 0; }
+</style>
+
+<div class="share-layout">
+  <div class="govuk-inset-text">
+    <p class="govuk-body govuk-!-font-weight-bold">{{ question }}</p>
+  </div>
+
+  <div class="share-response" id="share-answer"></div>
+
+  {% if datasets and datasets | length > 0 %}
+  <details class="govuk-details govuk-!-margin-top-4">
+    <summary class="govuk-details__summary">
+      <span class="govuk-details__summary-text">Datasets used</span>
+    </summary>
+    <div class="govuk-details__text">
+      <ul class="govuk-list govuk-list--bullet">
+        {% for d in datasets %}
+        <li>
+          {% if d.api_url %}<a href="{{ d.api_url }}" class="govuk-link" target="_blank" rel="noopener noreferrer">{{ d.name }}</a>{% else %}{{ d.name }}{% endif %} {# nosemgrep: template-href-var — URL from trusted DynamoDB data source registry, not user input #}
+        </li>
+        {% endfor %}
+      </ul>
+      {% if attribution | length > 0 %}
+      <p class="govuk-body-s">
+        {% for s in attribution %}{{ s }}<br>{% endfor %}
+        <a href="/attribution" class="govuk-link">Attribution</a>
+      </p>
+      {% endif %}
+    </div>
+  </details>
+  {% endif %}
+
+  <p class="govuk-body-s" style="color:#505a5f;">
+    Shared on {{ created_at | truncate(10, true, '') }}
+    · <a href="/" class="govuk-link">Ask your own question</a>
+  </p>
+</div>
+
+<script type="application/json" id="share-answer-data">{{ answer_html | jsonScript }}</script>
+<script type="application/json" id="share-blocks-data">{{ blocks | jsonRawSafe }}</script>
+<script type="application/json" id="share-charts-data">{{ charts | jsonRawSafe }}</script>
+<script type="application/json" id="share-maps-data">{{ maps | jsonRawSafe }}</script>
+<script src="/assets/chart.umd.min.js"></script>
+<script src="/assets/purify.min.js"></script>
+<link rel="stylesheet" href="/assets/maplibre-gl.css" />
+<script type="module" src="/static/maplibre-loader.mjs"></script>
+<script src="/static/govmap.js"></script>
+<!-- nosemgrep: insecure-document-method — all innerHTML assignments sanitised via DOMPurify -->
+<script>
+// nosemgrep: insecure-document-method — all innerHTML assignments sanitised via DOMPurify
+// The sharer's HTML keeps ids and classes for layout; style is dropped so one user can't lay CSS over the page for another
+function sanitise(html) { if (typeof DOMPurify === 'undefined') throw new Error('DOMPurify not loaded'); return DOMPurify.sanitize(html, { ADD_TAGS: ['canvas'], ADD_ATTR: ['id', 'class'] }); }
+(function() {
+  var container = document.getElementById('share-answer');
+  var read = function(id) { try { return JSON.parse(document.getElementById(id).textContent); } catch (e) { return []; } };
+  var blocks = read('share-blocks-data');
+  if (!Array.isArray(blocks) || !blocks.length) {
+    // Shares saved before blocks existed: the text, then every chart, then every map
+    blocks = [{ type: 'text', html: read('share-answer-data') || '' }];
+    (Array.isArray(read('share-charts-data')) ? read('share-charts-data') : []).forEach(function(c) { blocks.push({ type: 'chart', config: c }); });
+    (Array.isArray(read('share-maps-data')) ? read('share-maps-data') : []).forEach(function(m) { blocks.push({ type: 'map', config: m }); });
+  }
+
+  var chartNo = 0;
+  blocks.forEach(function(block) {
+    if (block.type === 'text' && typeof block.html === 'string') {
+      var el = document.createElement('div');
+      el.innerHTML = sanitise(block.html);
+      container.appendChild(el);
+    } else if (block.type === 'chart' && block.config) {
+      chartNo++;
+      var canvasId = 'share-chart-' + chartNo;
+      var wrapper = document.createElement('div');
+      wrapper.className = 'chat-visual';
+      wrapper.innerHTML = sanitise('<canvas id="' + canvasId + '"></canvas>');
+      container.appendChild(wrapper);
+      new Chart(document.getElementById(canvasId), block.config);
+    } else if (block.type === 'map' && block.config) {
+      var holder = document.createElement('div');
+      container.appendChild(holder);
+      renderMap(block.config, holder);
+    }
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

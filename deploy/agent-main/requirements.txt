@@ -1,0 +1,8 @@
+# Exact pins, matching the deployed image. Bump through the Renovate MR, not by hand.
+bedrock-agentcore==1.24.1
+starlette==1.8.0
+strands-agents[otel]==1.61.0
+boto3==1.43.114
+ag-ui-strands==1.0.1
+ag-ui-protocol==1.0.0
+aws-opentelemetry-distro==0.21.0

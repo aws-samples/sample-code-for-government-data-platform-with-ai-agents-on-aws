@@ -1,0 +1,84 @@
+{% extends "layout.html" %}
+
+{% block title %}Session — {{ sessionId | truncate(30) }}{% endblock %}
+
+{% block content %}
+<style>
+  .admin-summary, .admin-conversation { font-family: "Inter", arial, sans-serif; -webkit-font-smoothing: antialiased; }
+  .admin-conversation pre { font-family: monospace; }
+  .admin-md table { border-collapse: collapse; width: 100%; margin-bottom: 15px; font-size: 16px; }
+  .admin-md th, .admin-md td { border: 1px solid #b1b4b6; padding: 8px 10px; text-align: left; }
+  .admin-md th { background: #f3f2f1; font-weight: 700; }
+  .admin-md p { margin-bottom: 10px; }
+  .admin-md h2, .admin-md h3 { margin-top: 15px; }
+</style>
+<p><a class="govuk-back-link" href="/admin">All sessions</a></p>
+
+<h1 class="govuk-heading-l" style="word-break: break-all; font-size: 1.1rem;">
+  {{ sessionId }}
+  {% if agentType %}<strong class="govuk-tag govuk-tag--{% if agentType == 'Geo' %}green{% else %}blue{% endif %}" style="font-size:.75rem; vertical-align:middle; margin-left:.5rem;">{{ agentType }}</strong>{% endif %}
+</h1>
+
+{% if error %}
+<div class="govuk-error-summary" role="alert" aria-labelledby="error-summary-title">
+  <h2 class="govuk-error-summary__title" id="error-summary-title">Error loading session</h2>
+  <div class="govuk-error-summary__body"><p>{{ error }}</p></div>
+</div>
+{% endif %}
+
+{% if stats %}
+<div class="admin-summary" style="display:flex; gap:2rem; flex-wrap:wrap; padding:.8rem 1rem; background:#f3f2f1; border:1px solid #b1b4b6; border-radius:4px; margin-bottom:1.5rem; font-size:.9rem;">
+  {% if stats.elapsedSecs %}<span>⏱ <strong>{{ stats.elapsedSecs }}s</strong></span>{% endif %}
+  <span>Invocations: <strong>{{ stats.invocations }}</strong></span>
+  <span>Tokens: <strong>{{ stats.inputTokens | numberFormat }} in / {{ stats.outputTokens | numberFormat }} out</strong></span>
+  <span>Context: <strong{% if stats.lastInputTokens > 200000 %} style="color:#d4351c"{% endif %}>{{ stats.lastInputTokens | numberFormat }} / 200k</strong></span>
+  <span>SQL: <strong>{{ stats.sqlCount }}</strong></span>
+  <span style="{% if stats.errorCount > 0 %}color:#d4351c{% endif %}">Errors: <strong>{{ stats.errorCount }}</strong></span>
+  <span>Model: <strong>{{ stats.models }}</strong></span>
+</div>
+{% endif %}
+
+<div class="admin-conversation" style="display:flex; flex-direction:column; gap:.5rem;">
+{% for turn in turns %}
+
+  {% if turn.role == 'user' %}
+  <div style="background:#e8f0fe; padding:.6rem 1rem; border-radius:4px;">
+    <div style="font-size:.75rem; color:#505a5f; margin-bottom:.3rem;">👤 User — {{ turn.timestamp | replace('T', ' ') | truncate(19, true, '') }}</div>
+    <div>{{ turn.text }}</div>
+  </div>
+
+  {% elif turn.role == 'assistant' %}
+  <div style="background:#fff; padding:.6rem 1rem; border:1px solid #b1b4b6; border-radius:4px;">
+    <div style="font-size:.75rem; color:#505a5f; margin-bottom:.3rem;">
+      🤖 Assistant{% if turn.latencyMs %} — {{ turn.latencyMs }}ms{% endif %}
+    </div>
+    <div class="admin-md">{{ turn.text }}</div>
+  </div>
+
+  {% elif turn.role == 'tool_use' %}
+  <div style="background:#f0f0f0; border-radius:4px; overflow:hidden;">
+    <div style="font-size:.75rem; font-weight:bold; padding:.3rem .8rem; background:#0b0c0c; color:#fff;">
+      🔧 {{ turn.name }}
+    </div>
+    <pre style="margin:0; padding:.6rem 1rem; overflow-x:auto; font-size:.8rem; white-space:pre-wrap; word-break:break-word;{% if turn.isSql %} background:#1e1e1e; color:#d4d4d4;{% endif %}">{{ turn.input }}</pre>
+  </div>
+
+  {% elif turn.role == 'tool_result' %}
+  <div style="background:#f9f9f9; border-radius:4px; overflow:hidden;">
+    <div style="font-size:.75rem; font-weight:bold; padding:.3rem .8rem; background:{% if turn.status == 'error' %}#d4351c{% else %}#00703c{% endif %}; color:#fff;">
+      {% if turn.status == 'error' %}❌{% else %}✅{% endif %} result
+    </div>
+    <pre style="margin:0; padding:.6rem 1rem; overflow-x:auto; font-size:.8rem; white-space:pre-wrap; word-break:break-word;">{{ turn.text }}</pre>
+  </div>
+
+  {% endif %}
+{% endfor %}
+</div>
+<script src="/assets/marked.umd.js"></script>
+<script src="/assets/purify.min.js"></script>
+<script>
+document.querySelectorAll('.admin-md').forEach(function(el) {
+  el.innerHTML = DOMPurify.sanitize(marked.parse(el.textContent));
+});
+</script>
+{% endblock %}

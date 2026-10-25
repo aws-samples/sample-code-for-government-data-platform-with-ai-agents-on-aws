@@ -1,0 +1,47 @@
+version: 0.2
+
+# Content-addressable tag + skip-if-exists. Same source -> same tag -> stable SSM.
+
+phases:
+  pre_build:
+    commands:
+      - cd deploy/agent-walkthrough
+      - |
+        set -eo pipefail
+        IMAGE_TAG=$(find . ../agent-shared-tools -type f \
+          ! -path './tools/*' ! -path '*/__pycache__/*' \
+          | sort | xargs sha256sum | sha256sum | cut -c1-12)
+        echo "$IMAGE_TAG" > /tmp/image-tag
+        echo "Tag: $IMAGE_TAG"
+        if aws ecr describe-images --repository-name "${PREFIX_CODE}/agent-walkthrough" --image-ids imageTag="$IMAGE_TAG" --region "$AWS_DEFAULT_REGION" --query 'imageDetails[0].imageDigest' --output text 2>/dev/null | grep -q sha256; then
+          echo "Image already in ECR, skipping docker build+push"
+          touch /tmp/skip-build
+        else
+          echo "Image not in ECR, will build"
+          rm -rf tools && cp -r ../agent-shared-tools tools
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+        fi
+  build:
+    commands:
+      - |
+        set -eo pipefail
+        IMAGE_TAG=$(cat /tmp/image-tag)
+        if [ ! -f /tmp/skip-build ]; then
+          docker build -t "$ECR_REPO:$IMAGE_TAG" .
+        fi
+  post_build:
+    commands:
+      - |
+        set -eo pipefail
+        IMAGE_TAG=$(cat /tmp/image-tag)
+        REPO_NAME="${PREFIX_CODE}/agent-walkthrough"
+        if [ ! -f /tmp/skip-build ]; then
+          if ! docker push "$ECR_REPO:$IMAGE_TAG"; then
+            if aws ecr describe-images --repository-name "$REPO_NAME" --image-ids imageTag="$IMAGE_TAG" --region "$AWS_DEFAULT_REGION" --query 'imageDetails[0].imageDigest' --output text 2>/dev/null | grep -q sha256; then
+              echo "Push failed but tag exists in ECR (parallel build won the race); continuing"
+            else
+              exit 1
+            fi
+          fi
+        fi
+        aws ssm put-parameter --name "/${PREFIX_CODE}/walkthrough-image-tag" --value "$IMAGE_TAG" --type SecureString --overwrite --region "$AWS_DEFAULT_REGION"

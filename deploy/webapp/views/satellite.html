@@ -1,0 +1,624 @@
+{% extends "layout.html" %}
+
+{% block title %}Satellite Analysis — Ask Your Neighbourhood{% endblock %}
+
+{% block content %}
+<style>
+  .chat-layout { max-width: 960px; }
+  .chat-entry { margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid #b1b4b6; }
+  .chat-entry:last-of-type { border-bottom: none; }
+  .chat-question { border-left: 10px solid #b1b4b6; padding: 15px 0 15px 15px; margin-bottom: 15px; }
+  .chat-question p { margin: 0; }
+  .chat-response { min-height: 40px; font-family: "GDS Transport", arial, sans-serif; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; font-size: 19px; line-height: 1.5; }
+  .chat-response h1, .chat-response h2, .chat-response h3 { font-family: "GDS Transport", arial, sans-serif; font-weight: 700; }
+  .chat-response p { margin-bottom: 15px; }
+  .chat-response ul, .chat-response ol { margin-bottom: 15px; padding-left: 20px; }
+  .chat-response table { border-collapse: collapse; width: 100%; margin-bottom: 20px; font-size: 16px; }
+  .chat-response img { max-width: 100%; height: auto; border: 1px solid #b1b4b6; margin: 15px 0; border-radius: 2px; }
+  .chat-response th, .chat-response td { border: 1px solid #b1b4b6; padding: 10px; text-align: left; }
+  .chat-response th { background: #f3f2f1; font-weight: 700; }
+  .sidebar-item { display: block; padding: 4px 0; font-size: 14px; }
+  .sidebar-item:hover { color: #1d70b8; }
+  .chat-loading { display: flex; align-items: center; gap: 10px; }
+  .chat-loading svg { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+
+<div class="chat-layout">
+    <details class="govuk-details" id="question-nav" style="display:none;">
+      <summary class="govuk-details__summary">
+        <span class="govuk-details__summary-text">Questions in this session</span>
+      </summary>
+      <div class="govuk-details__text">
+        <div id="sidebar-list"></div>
+      </div>
+    </details>
+
+    <div id="welcome" class="govuk-!-margin-bottom-6">
+      <h1 class="govuk-heading-xl">Satellite analysis</h1>
+      <p class="govuk-body-l">Zoom into an area on the map, then ask a question about what you see.</p>
+      <div class="govuk-inset-text">
+        Analysis uses free Sentinel-2 (10m) and Landsat (30m) satellite imagery via the STAC API.
+      </div>
+    </div>
+
+    <div id="sat-map" style="height:450px;border:1px solid #b1b4b6;margin-bottom:10px;"></div>
+    <div id="overlay-key" class="govuk-!-margin-bottom-4" style="display:none;" role="region" aria-label="Map overlay key and provenance">
+      <h2 class="govuk-heading-s govuk-!-margin-bottom-1" id="overlay-key-title">Map overlay</h2>
+      <ul class="govuk-list govuk-!-margin-bottom-1" id="overlay-key-ramp" style="display:flex;gap:12px;flex-wrap:wrap;padding:0;"></ul>
+      <p class="govuk-body-s govuk-!-margin-bottom-1" id="overlay-key-scenes" style="color:#505a5f;"></p>
+      <p class="govuk-body-s govuk-!-margin-bottom-0" id="overlay-key-note" style="color:#505a5f;"></p>
+    </div>
+    <div class="govuk-!-margin-bottom-4">
+      <p class="govuk-body-s govuk-!-margin-bottom-1" id="coords-display" style="color:#505a5f;">Zoom and pan to select the area you want to analyse</p>
+    </div>
+
+    <div id="conversation"></div>
+
+    <div id="input-area">
+      <div class="govuk-form-group">
+        <label class="govuk-label govuk-label--m" for="prompt" id="prompt-label">
+          What would you like to know about this area?
+        </label>
+        <textarea class="govuk-textarea" id="prompt" name="prompt" rows="3" aria-labelledby="prompt-label">Tell me what's here</textarea>
+      </div>
+      <button type="button" class="govuk-button" id="send-btn">Analyse</button>
+      <button type="button" class="govuk-button govuk-button--secondary govuk-!-margin-left-1" id="cancel-btn" style="display:none;">Cancel</button>
+      <button type="button" class="govuk-button govuk-button--secondary govuk-!-margin-left-1" id="top-btn" onclick="document.getElementById('main-content').scrollIntoView({behavior:'smooth'})">Home</button>
+    </div>
+
+    <div id="scenario-picker">
+    <details class="govuk-details govuk-!-margin-top-4">
+      <summary class="govuk-details__summary">
+        <span class="govuk-details__summary-text">Sample analyses</span>
+      </summary>
+      <div class="govuk-details__text">
+        {% for s in scenarios %}
+        <div style="margin-bottom:15px;">
+          <a href="#" class="govuk-link govuk-body-s govuk-!-font-weight-bold" onclick="event.preventDefault();this.closest('details').removeAttribute('open');loadScenario('{{ s.key }}');">
+            {{ s.title }}
+          </a>
+          <br>
+          <span class="govuk-body-s" style="color:#505a5f;">{{ s.desc }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </details>
+    </div>
+
+    <p id="model-info" class="govuk-body-s govuk-!-margin-top-4" style="color:#505a5f;display:none;"></p>
+</div>
+
+<script src="/assets/marked.umd.js"></script>
+<script src="/assets/purify.min.js"></script>
+<link rel="stylesheet" href="/assets/maplibre-gl.css" />
+<script type="module" src="/static/maplibre-loader.mjs"></script>
+<!-- nosemgrep: insecure-document-method — all innerHTML assignments sanitised via DOMPurify -->
+<script>
+// Scenario definitions — rendered from server-side config (server.js SAT_SCENARIOS)
+var _SAT_SCENARIOS = {};
+{{ scenarios | jsonScript }}.forEach(function(s) { _SAT_SCENARIOS[s.key] = { center: s.center, zoom: s.zoom, prompt: s.prompt }; });
+window.loadScenario = function(key) {
+  var s = _SAT_SCENARIOS[key];
+  if (!s) return;
+  // The last answer and its overlays go now, not when the auto-submit fires after the map has flown
+  if (window.clearAnalysis) window.clearAnalysis();
+  if (window._satMap) window._satMap.flyTo({ center: s.center, zoom: s.zoom, duration: 1500 });
+  var promptEl = document.getElementById('prompt');
+  if (promptEl) promptEl.value = s.prompt;
+  var picker = document.getElementById('scenario-picker');
+  if (picker) picker.style.display = 'none';
+  var welcome = document.getElementById('welcome');
+  if (welcome) welcome.style.display = 'none';
+  // Update URL so the share button reflects this scenario
+  var url = new URL(window.location);
+  url.searchParams.set('scenario', key);
+  url.searchParams.delete('lng'); url.searchParams.delete('lat'); url.searchParams.delete('zoom'); url.searchParams.delete('prompt');
+  window.history.replaceState({}, '', url);
+  if (promptEl) promptEl.focus();
+  // Auto-submit after map animation completes
+  setTimeout(function() {
+    var sendBtn = document.getElementById('send-btn');
+    if (sendBtn) sendBtn.click();
+  }, 2000);
+};
+
+window.copyShareLink = function() {
+  // replaced by per-response share links
+};
+// Deep-link boot — auto-load scenario or map position from URL params
+(function() {
+  var params = new URLSearchParams(window.location.search);
+  var scenario = params.get('scenario');
+  if (scenario && _SAT_SCENARIOS[scenario]) {
+    // Wait for map to be ready before flying
+    var attempts = 0;
+    var tryLoad = setInterval(function() {
+      attempts++;
+      if (window._satMap || attempts > 40) {
+        clearInterval(tryLoad);
+        window.loadScenario(scenario);
+      }
+    }, 100);
+  } else if (params.get('lng') && params.get('lat')) {
+    var lng = parseFloat(params.get('lng'));
+    var lat = parseFloat(params.get('lat'));
+    var zoom = parseFloat(params.get('zoom') || '13');
+    var prompt = params.get('prompt');
+    var attempts = 0;
+    var tryLoad = setInterval(function() {
+      attempts++;
+      if (window._satMap || attempts > 40) {
+        clearInterval(tryLoad);
+        if (window._satMap) window._satMap.flyTo({ center: [lng, lat], zoom: zoom, duration: 0 });
+        if (prompt) {
+          var promptEl = document.getElementById('prompt');
+          if (promptEl) promptEl.value = prompt;
+        }
+        var picker = document.getElementById('scenario-picker');
+        if (picker) picker.style.display = 'none';
+        var welcome = document.getElementById('welcome');
+        if (welcome) welcome.style.display = 'none';
+      }
+    }, 100);
+  }
+})();
+window.showScenarioPicker = function() {
+  var picker = document.getElementById('scenario-picker');
+  if (picker) picker.style.display = '';
+  var welcome = document.getElementById('welcome');
+  if (welcome) welcome.style.display = '';
+  if (window.clearAnalysis) window.clearAnalysis();
+  var promptEl = document.getElementById('prompt');
+  if (promptEl) { promptEl.value = 'Tell me what\'s here'; }
+  document.getElementById('main-content').scrollIntoView({ behavior: 'smooth' });
+  var url = new URL(window.location);
+  url.searchParams.delete('scenario');
+  window.history.replaceState({}, '', url);
+};
+</script>
+<script type="module">
+// nosemgrep: insecure-document-method — all innerHTML assignments sanitised via DOMPurify
+function sanitise(html) { if (typeof DOMPurify === 'undefined') throw new Error('DOMPurify not loaded'); return DOMPurify.sanitize(html, { ADD_TAGS: ['canvas'], ADD_ATTR: ['id', 'style', 'class', 'target', 'rel'] }); }
+(function() {
+  var sessionId = '{{ sessionId }}';
+  var conversation = document.getElementById('conversation');
+  var promptEl = document.getElementById('prompt');
+  var sendBtn = document.getElementById('send-btn');
+  var cancelBtn = document.getElementById('cancel-btn');
+  var sidebarList = document.getElementById('sidebar-list');
+  var welcome = document.getElementById('welcome');
+  var coordsDisplay = document.getElementById('coords-display');
+  var questionCount = 0;
+  var abortController = null;
+  var isStreaming = false;
+  var messageHistory = [];
+  var overlayCount = 0;
+  var overlayIds = [];
+  // The polygon sent with the last question; a different one starts a new history
+  var lastPolygon = null;
+
+  // Expose submitQuery immediately — function declarations are hoisted so submit() is available
+  window.submitQuery = function(promptText, coordinates) {
+    if (promptText) promptEl.value = promptText;
+    if (coordinates) {
+      // Called from test with explicit coordinates — bypass viewportToPolygon
+      var text = promptEl.value.trim();
+      if (!text || isStreaming) return;
+      promptEl.value = '';
+      var qNum = addQuestion(text);
+      streamResponse(text, qNum, coordinates);
+    } else {
+      submit();
+    }
+  };
+
+  // --- Map with the Amazon Location Hybrid basemap (imagery with roads and labels), served through /map/style ---
+  var satMap;
+  try {
+    satMap = new maplibregl.Map({
+    container: 'sat-map',
+    style: window.location.origin + '/map/style?style=Hybrid',
+    center: [-1.5, 53.0],
+    zoom: 6,
+    // The style carries the basemap credit; the analysis overlays are derived from Sentinel-2 and Landsat scenes
+    attributionControl: { compact: true, customAttribution: 'Contains modified Copernicus Sentinel data ' + new Date().getFullYear() + '. Landsat imagery courtesy of the U.S. Geological Survey' }
+  });
+  satMap.addControl(new maplibregl.NavigationControl(), 'top-right');
+  window._satMap = satMap;
+  } catch(e) { console.warn('Map init failed:', e); }
+
+  // Update coordinates display when map moves
+  function updateCoordsDisplay() {
+    var bounds = satMap.getBounds();
+    var sw = bounds.getSouthWest();
+    var ne = bounds.getNorthEast();
+    var swLng = sw.lng.toFixed(4);
+    var neLng = ne.lng.toFixed(4);
+    var swLngStr = Math.abs(sw.lng).toFixed(4) + (sw.lng < 0 ? '°W' : '°E');
+    var neLngStr = Math.abs(ne.lng).toFixed(4) + (ne.lng < 0 ? '°W' : '°E');
+    coordsDisplay.textContent = 'Area: ' + sw.lat.toFixed(4) + '°N, ' + swLngStr + ' to ' + ne.lat.toFixed(4) + '°N, ' + neLngStr;
+  }
+  satMap.on('moveend', updateCoordsDisplay);
+
+  function viewportToPolygon() {
+    var bounds = satMap.getBounds();
+    var sw = bounds.getSouthWest();
+    var ne = bounds.getNorthEast();
+    return [[sw.lng, sw.lat], [ne.lng, sw.lat], [ne.lng, ne.lat], [sw.lng, ne.lat], [sw.lng, sw.lat]];
+  }
+
+  // --- Map overlay rendering ---
+  function addOverlayToMap(config) {
+    overlayCount++;
+    var layerId = 'sat-overlay-' + overlayCount;
+    var bounds = config.bounds; // [[south, west], [north, east]]
+    var imgCoords = [
+      [bounds[0][1], bounds[1][0]], // top-left: [west, north]
+      [bounds[1][1], bounds[1][0]], // top-right: [east, north]
+      [bounds[1][1], bounds[0][0]], // bottom-right: [east, south]
+      [bounds[0][1], bounds[0][0]]  // bottom-left: [west, south]
+    ];
+    satMap.addSource(layerId, {
+      type: 'image',
+      url: 'data:image/png;base64,' + config.image_data,
+      coordinates: imgCoords
+    });
+    satMap.addLayer({
+      id: layerId, type: 'raster', source: layerId,
+      paint: { 'raster-opacity': 0.75 }
+    });
+    overlayIds.push(layerId);
+    showOverlayKey(config);
+  }
+
+  // The key under the map: the colour scale with numeric labels, the scenes the overlay was drawn from and what it does not show
+  function showOverlayKey(config) {
+    var legend = config.legend || {};
+    var prov = config.provenance || {};
+    var indexName = legend.index || 'index';
+    document.getElementById('overlay-key-title').textContent = 'Map overlay: ' + indexName + (legend.kind === 'change' ? ' change' : '');
+    var ramp = document.getElementById('overlay-key-ramp');
+    ramp.textContent = '';
+    (legend.swatches || []).forEach(function(stop) {
+      var rgba = stop.rgba || [245, 245, 245, 255];
+      var item = document.createElement('li');
+      item.className = 'govuk-body-s';
+      item.style.cssText = 'display:flex;align-items:center;gap:6px;margin:0;color:#505a5f;';
+      var chip = document.createElement('span');
+      chip.setAttribute('aria-hidden', 'true');
+      chip.style.cssText = 'display:inline-block;width:20px;height:12px;border:1px solid #b1b4b6;background:rgba('
+        + rgba[0] + ',' + rgba[1] + ',' + rgba[2] + ',' + (rgba[3] / 255) + ');';
+      var label = document.createElement('span');
+      var value = Number(stop.value);
+      label.textContent = (value > 0 ? '+' : '') + value.toFixed(2);
+      item.appendChild(chip);
+      item.appendChild(label);
+      ramp.appendChild(item);
+    });
+    function scene(side, which) {
+      if (!side || !side.scene_id) return null;
+      var cloud = side.cloud_cover_pct === null || side.cloud_cover_pct === undefined ? 'cloud unknown' : side.cloud_cover_pct + '% cloud';
+      return which + side.scene_id + ' (' + (side.capture_date || 'date unknown') + ', ' + cloud + ')';
+    }
+    var scenes = prov.before ? [scene(prov.before, 'Before: '), scene(prov.after, 'After: ')] : [scene(prov.after, 'Scene: ')];
+    document.getElementById('overlay-key-scenes').textContent = scenes.filter(Boolean).join(' \u00b7 ');
+    var meaning = legend.meaning ? legend.meaning.charAt(0).toUpperCase() + legend.meaning.slice(1) + '.' : '';
+    document.getElementById('overlay-key-note').textContent = [meaning, prov.note].filter(Boolean).join(' ');
+    document.getElementById('overlay-key').style.display = '';
+  }
+
+  function clearOverlays() {
+    overlayIds.forEach(function(id) {
+      if (satMap.getLayer(id)) satMap.removeLayer(id);
+      if (satMap.getSource(id)) satMap.removeSource(id);
+    });
+    overlayIds = [];
+    document.getElementById('overlay-key').style.display = 'none';
+  }
+
+  // One answer at a time: the last answer, its link and its overlays go before a new question or scenario starts
+  window.clearAnalysis = function() {
+    conversation.innerHTML = '';
+    sidebarList.innerHTML = '';
+    clearOverlays();
+  };
+
+  // --- Question and response flow (same pattern as chat.html) ---
+
+  function addQuestion(text) {
+    questionCount++;
+    var entryId = 'q-' + questionCount;
+
+    if (questionCount === 1) {
+      welcome.style.display = 'none';
+      document.getElementById('question-nav').style.display = '';
+    }
+
+    document.getElementById('prompt-label').textContent = 'Ask a follow-up question';
+    window.clearAnalysis();
+
+    var short = text.length > 50 ? text.slice(0, 50) + '…' : text;
+    var link = document.createElement('a');
+    link.href = '#' + entryId;
+    link.className = 'govuk-link sidebar-item';
+    link.id = 'sidebar-' + questionCount;
+    link.textContent = short;
+    sidebarList.appendChild(link);
+
+    var entry = document.createElement('div');
+    entry.className = 'chat-entry';
+    entry.id = entryId;
+    entry.innerHTML = sanitise('<div class="chat-question"><p class="govuk-body govuk-!-font-weight-bold">' + escHtml(text) + '</p></div>'
+      + '<div class="chat-response" id="resp-' + questionCount + '">'
+      + '<div class="chat-loading" id="loading-' + questionCount + '"><svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" stroke="#1d70b8" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg><span class="govuk-body">Analysing satellite imagery...</span></div>'
+      + '</div>');
+    conversation.appendChild(entry);
+    // The map stays in view, with the question and answer under it
+    document.getElementById('sat-map').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    return questionCount;
+  }
+
+  // Friendly loading messages — keyed by tool name, sequenced on repeated calls
+  var _GEO_MESSAGES = {
+    analyse_area: [
+      'Finding the clearest satellite scene and computing the index\u2026',
+      'Running a further analysis\u2026',
+    ],
+    compare_change: [
+      'Finding matched before and after scenes and measuring the change\u2026',
+      'Running a further comparison\u2026',
+    ],
+  };
+  var _toolCallCount = {};
+
+  function _geoLoadingMessage(toolName) {
+    var msgs = _GEO_MESSAGES[toolName];
+    if (!msgs) return null;
+    var n = _toolCallCount[toolName] || 0;
+    _toolCallCount[toolName] = n + 1;
+    return msgs[Math.min(n, msgs.length - 1)];
+  }
+
+  function streamResponse(prompt, qNum, overrideCoordinates) {
+    var responseEl = document.getElementById('resp-' + qNum);
+    var loadingEl = document.getElementById('loading-' + qNum);
+    var fullText = '';
+    var startTime = Date.now();
+    isStreaming = true;
+    _toolCallCount = {};
+    abortController = new AbortController();
+    sendBtn.style.display = 'none';
+    cancelBtn.style.display = '';
+
+    var coordinates = overrideCoordinates || viewportToPolygon();
+    var polygon = JSON.stringify(coordinates);
+    if (polygon !== lastPolygon) messageHistory = [];
+    lastPolygon = polygon;
+
+    messageHistory.push({ role: 'user', content: prompt });
+
+    var historyToSend = messageHistory;
+
+    // The answer text sits above any loading indicator; the guardrail message replaces it
+    function renderText(markdown) {
+      var textDiv = responseEl.querySelector('.chat-text');
+      if (!textDiv) {
+        textDiv = document.createElement('div');
+        textDiv.className = 'chat-text';
+        responseEl.insertBefore(textDiv, responseEl.firstChild);
+      }
+      textDiv.innerHTML = sanitise(marked.parse(markdown));
+      loadingEl.style.display = 'none';
+    }
+
+    fetch('/query-stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: prompt, session_id: sessionId, messages: historyToSend, mode: 'geospatial', coordinates: coordinates }),
+      signal: abortController.signal
+    }).then(function(response) {
+      if (!response.ok) {
+        if (response.status === 401) { window.location.href = '/auth/login?returnTo=' + encodeURIComponent(window.location.pathname + window.location.search); return; }
+        throw new Error(response.status === 429 ? 'Too many requests. Wait a minute and try again.' : 'The service returned ' + response.status);
+      }
+      var reader = response.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+
+      function read() {
+        reader.read().then(function(result) {
+          if (result.done) { finish(); return; }
+          buffer += decoder.decode(result.value, { stream: true });
+          var lines = buffer.split('\n');
+          buffer = lines.pop();
+
+          for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            if (!line.startsWith('data: ')) continue;
+            try {
+              var data = JSON.parse(line.substring(6));
+              var eventType = data.type || '';
+
+              if (eventType === 'RUN_ERROR') {
+                loadingEl.style.display = 'none';
+                responseEl.innerHTML = sanitise('<div class="govuk-error-summary"><h2 class="govuk-error-summary__title">Something went wrong</h2><div class="govuk-error-summary__body"><p class="govuk-body">' + (data.message || 'Unknown error') + '</p></div></div>');
+                finish(); return;
+              }
+
+              if (eventType === 'RUN_FINISHED') { finish(); return; }
+
+              if (eventType === 'RUN_STARTED') {
+                loadingEl.style.display = 'flex';
+                loadingEl.querySelector('span').textContent = 'Connecting to satellite analysis service\u2026';
+              }
+
+              if (eventType === 'TEXT_MESSAGE_CONTENT' && data.delta) {
+                fullText += data.delta;
+                renderText(fullText.split('\n').filter(function(l) { return !l.trim().startsWith('FOLLOWUP:'); }).join('\n'));
+              }
+
+              if (eventType === 'TOOL_CALL_START' && data.toolCallName) {
+                fullText += '\n\n';
+                var msg = _geoLoadingMessage(data.toolCallName);
+                if (msg) {
+                  loadingEl.style.display = 'flex';
+                  loadingEl.querySelector('span').textContent = msg;
+                }
+              }
+
+              // Geo agent CUSTOM events: map overlays, and a guardrail block that replaces the answer
+              if (eventType === 'CUSTOM') {
+                if (data.name === 'map_overlay' && data.value) {
+                  addOverlayToMap(data.value);
+                  loadingEl.style.display = 'none';
+                }
+                if (data.name === 'guardrail' && data.value && data.value.message) {
+                  clearOverlays();
+                  fullText = data.value.message;
+                  renderText(fullText);
+                }
+              }
+
+            } catch(e) {}
+          }
+          read();
+        });
+      }
+      read();
+    }).catch(function(err) {
+      if (err.name === 'AbortError') {
+        isStreaming = false;
+        loadingEl.style.display = 'none';
+        return;
+      }
+      loadingEl.style.display = 'none';
+      responseEl.innerHTML = sanitise('<div class="govuk-error-summary"><h2 class="govuk-error-summary__title">Something went wrong</h2><div class="govuk-error-summary__body"><p class="govuk-body">' + err.message + '</p></div></div>');
+    });
+
+    function finish() {
+      isStreaming = false;
+      loadingEl.style.display = 'none';
+      if (fullText) {
+        messageHistory.push({ role: 'assistant', content: fullText });
+      }
+      sendBtn.style.display = '';
+      sendBtn.disabled = false;
+      cancelBtn.style.display = 'none';
+      var picker = document.getElementById('scenario-picker');
+      if (picker) picker.style.display = '';
+
+      // Extract FOLLOWUP lines
+      var followups = [];
+      var allLines = fullText.split('\n');
+      var preFilteredLines = [];
+      for (var ai = 0; ai < allLines.length; ai++) {
+        var al = allLines[ai].trim();
+        if (al.startsWith('FOLLOWUP:') || al.startsWith('**FOLLOWUP:**') || al.startsWith('**FOLLOWUP:')) {
+          followups.push(al.replace(/^\*{0,2}FOLLOWUP:\*{0,2}\s*/, '').trim());
+        } else {
+          preFilteredLines.push(allLines[ai]);
+        }
+      }
+      var cleanText = preFilteredLines.join('\n').trim();
+
+      if (cleanText) renderText(cleanText);
+
+      // Elapsed time + share link
+      var elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      var metaEl = document.createElement('p');
+      metaEl.className = 'govuk-body-s govuk-!-margin-top-4';
+      metaEl.style.color = '#505a5f';
+      metaEl.innerHTML = sanitise(elapsed + 's &nbsp;·&nbsp; <a href="#" class="govuk-link share-link">Share this analysis</a>');
+      responseEl.appendChild(metaEl);
+
+      // Share click — save snapshot to DynamoDB via /share, same as chat page
+      // Strip inline base64 images before saving — too large for DynamoDB (400KB limit)
+      var shareLink = metaEl.querySelector('.share-link');
+      shareLink.addEventListener('click', function(e) {
+        e.preventDefault();
+        var link = this;
+        link.textContent = 'Saving\u2026';
+        var answerHtml = responseEl.querySelector('.chat-text') ? responseEl.querySelector('.chat-text').innerHTML : '';
+        // Include inline images — server will upload to S3 and replace data: URIs
+        var imgs = responseEl.querySelectorAll('img');
+        var imgHtml = Array.from(imgs).map(function(img) { return img.outerHTML; }).join('');
+        fetch('/share', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question: prompt, answer_html: imgHtml + answerHtml, charts: [], maps: [], datasets: [] })
+        }).then(function(r) { return r.json(); }).then(function(data) {
+          if (data.url) {
+            link.textContent = 'Link copied';
+            link.href = data.url;
+            link.target = '_blank';
+            navigator.clipboard.writeText(window.location.origin + data.url).catch(function() {});
+          } else { link.textContent = 'Share failed'; }
+        }).catch(function() { link.textContent = 'Share failed'; });
+      });
+
+      // Follow-ups
+      if (followups.length > 0) {
+        var fDiv = document.createElement('div');
+        fDiv.className = 'govuk-!-margin-top-4';
+        fDiv.innerHTML = sanitise('<p class="govuk-body-s" style="color:#505a5f;">Follow-up questions:</p>');
+        followups.forEach(function(q) {
+          var a = document.createElement('a');
+          a.href = '#';
+          a.className = 'govuk-link govuk-body-s';
+          a.style.display = 'block';
+          a.style.marginBottom = '5px';
+          a.textContent = q;
+          a.onclick = function(e) { e.preventDefault(); promptEl.value = this.textContent; submit(); };
+          fDiv.appendChild(a);
+        });
+        responseEl.appendChild(fDiv);
+      }
+
+      // Model info
+      fetch('/model-info').then(function(r) { return r.json(); }).then(function(data) {
+        if (data.model_id) {
+          document.getElementById('model-info').textContent = 'Model: ' + data.model_id + ' | ' + elapsed + 's | Session: ' + sessionId;
+          document.getElementById('model-info').style.display = '';
+        }
+      }).catch(function() {});
+
+      var nearBottom = (window.innerHeight + window.scrollY) >= (document.body.scrollHeight - 200);
+      if (nearBottom) promptEl.focus();
+    }
+  }
+
+  function escHtml(str) {
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
+  }
+
+  function submit() {
+    var text = promptEl.value.trim();
+    if (!text || isStreaming) return;
+    promptEl.value = '';
+    var qNum = addQuestion(text);
+    streamResponse(text, qNum);
+  }
+  sendBtn.addEventListener('click', submit);
+  cancelBtn.addEventListener('click', function() {
+    if (abortController) abortController.abort();
+    isStreaming = false;
+    sendBtn.style.display = '';
+    sendBtn.disabled = false;
+    cancelBtn.style.display = 'none';
+    document.querySelectorAll('.chat-loading').forEach(function(el) { el.style.display = 'none'; });
+    fetch('/cancel-agent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, mode: 'geospatial' })
+    }).catch(function() {});
+  });
+  promptEl.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
+  });
+})();
+</script>
+{% endblock %}

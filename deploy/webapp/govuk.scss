@@ -1,0 +1,4 @@
+// Custom GOV.UK Frontend CSS — replaces GDS Transport with Inter
+$govuk-font-family: "Inter", arial, sans-serif;
+$govuk-include-default-font-face: false;
+@import "node_modules/govuk-frontend/dist/govuk/index";

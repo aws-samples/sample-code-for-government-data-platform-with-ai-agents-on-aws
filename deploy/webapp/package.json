@@ -1,0 +1,34 @@
+{
+  "name": "govdata-webapp",
+  "version": "2.1.0",
+  "description": "GOV.UK frontend for the Government Data Platform (AgentCore)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build:css": "sass govuk.scss govuk-built.css --style=compressed --no-source-map"
+  },
+  "devDependencies": {
+    "sass": "1.105.1"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-agentcore": "3.1152.0",
+    "@aws-sdk/client-cloudwatch-logs": "3.1152.0",
+    "@aws-sdk/client-dynamodb": "3.1152.0",
+    "@aws-sdk/client-geo-maps": "3.1152.0",
+    "@aws-sdk/client-redshift-data": "3.1152.0",
+    "@aws-sdk/client-s3": "3.1152.0",
+    "@aws-sdk/client-ssm": "3.1152.0",
+    "@aws-sdk/util-dynamodb": "3.996.9",
+    "@aws/aws-distro-opentelemetry-node-autoinstrumentation": "0.13.0",
+    "aws-jwt-verify": "5.2.1",
+    "chart.js": "4.5.1",
+    "dompurify": "3.4.17",
+    "express": "5.3.0",
+    "express-rate-limit": "8.7.1",
+    "govuk-frontend": "6.6.0",
+    "maplibre-gl": "6.14.0",
+    "marked": "18.1.1",
+    "nunjucks": "3.2.4",
+    "openid-client": "6.8.8"
+  }
+}

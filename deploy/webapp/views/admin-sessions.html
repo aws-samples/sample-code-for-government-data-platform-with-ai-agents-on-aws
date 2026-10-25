@@ -1,0 +1,59 @@
+{% extends "layout.html" %}
+
+{% block title %}Admin — Sessions{% endblock %}
+
+{% block content %}
+<h1 class="govuk-heading-l">Agent Sessions</h1>
+
+<form method="get" action="/admin" class="govuk-form-group" style="margin-bottom: 1.5rem;">
+  <label class="govuk-label" for="hours">Show sessions from the last</label>
+  <select class="govuk-select" id="hours" name="hours" onchange="document.getElementById('loading').hidden=false;this.form.submit()">
+    <option value="1" {% if hours == 1 %}selected{% endif %}>1 hour</option>
+    <option value="4" {% if hours == 4 %}selected{% endif %}>4 hours</option>
+    <option value="24" {% if hours == 24 %}selected{% endif %}>1 day</option>
+    <option value="168" {% if hours == 168 %}selected{% endif %}>7 days</option>
+    <option value="720" {% if hours == 720 %}selected{% endif %}>30 days</option>
+  </select>
+  <span id="loading" hidden style="margin-left:.5rem;font-size:.9rem;color:#505a5f;">Loading…</span>
+</form>
+
+{% if error %}
+<div class="govuk-error-summary" role="alert" aria-labelledby="error-summary-title">
+  <h2 class="govuk-error-summary__title" id="error-summary-title">Error loading sessions</h2>
+  <div class="govuk-error-summary__body"><p>{{ error }}</p></div>
+</div>
+{% endif %}
+
+<p class="govuk-body">{{ sessions | length }} sessions found</p>
+
+<table class="govuk-table govuk-!-font-size-16">
+  <thead class="govuk-table__head">
+    <tr class="govuk-table__row">
+      <th class="govuk-table__header" scope="col">Session</th>
+      <th class="govuk-table__header" scope="col">Agent</th>
+      <th class="govuk-table__header govuk-table__header--numeric" scope="col">Invocations</th>
+      <th class="govuk-table__header govuk-table__header--numeric" scope="col">Tokens</th>
+      <th class="govuk-table__header" scope="col">First seen</th>
+      <th class="govuk-table__header" scope="col">Last seen</th>
+    </tr>
+  </thead>
+  <tbody class="govuk-table__body">
+    {% for s in sessions %}
+    <tr class="govuk-table__row">
+      <td class="govuk-table__cell">
+        <a class="govuk-link" href="/admin/session/{{ s.session_id | urlencode }}" title="{{ s.session_id }}">
+          {{ s.session_id | truncate(24) }}
+        </a>
+      </td>
+      <td class="govuk-table__cell">
+        <strong class="govuk-tag govuk-tag--{% if s.agentType == 'Geo' %}green{% elif s.agentType == 'Walk' %}purple{% else %}blue{% endif %}" style="font-size:.75rem;">{{ s.agentType | default('Data') }}</strong>
+      </td>
+      <td class="govuk-table__cell govuk-table__cell--numeric">{{ s.invocations }}</td>
+      <td class="govuk-table__cell govuk-table__cell--numeric">{{ s.totalInputTokens | default(0) | numberFormat }}</td>
+      <td class="govuk-table__cell">{{ s.firstSeen | default('') | replace('T', ' ') | truncate(16, true, '') }}</td>
+      <td class="govuk-table__cell">{{ s.lastSeen | default('') | replace('T', ' ') | truncate(16, true, '') }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

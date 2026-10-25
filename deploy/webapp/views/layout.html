@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en" class="govuk-template">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{% block title %}Ask Your Neighbourhood{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/govuk-built.css">
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0b0c0c">
+  <style>
+    .govmap { margin: 20px 0; }
+    .govmap-canvas { height: 400px; max-width: 700px; border: 1px solid #b1b4b6; }
+  </style>
+</head>
+<body class="govuk-template__body">
+  <script>document.body.className += ' js-enabled';</script>
+
+  <a href="#main-content" class="govuk-skip-link" data-module="govuk-skip-link">Skip to main content</a>
+
+  <header class="govuk-template__header">
+    <div class="govuk-header" data-module="govuk-header" style="padding-top:env(safe-area-inset-top);">
+      <div class="govuk-header__container govuk-width-container">
+        <div class="govuk-header__logo">
+          <a href="/" style="display:flex;align-items:center;gap:14px;text-decoration:none !important;width:fit-content;">
+            <span style="color:white;font-size:28px;font-weight:700;letter-spacing:-0.5px;line-height:1;">PUB<span style="color:#00a1c9;">.</span>SEC</span>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <nav class="govuk-service-navigation" data-module="govuk-service-navigation" aria-label="Service">
+      <div class="govuk-width-container">
+        <div class="govuk-service-navigation__container">
+          <span class="govuk-service-navigation__service-name">
+            <a href="/" class="govuk-service-navigation__link">Ask Your Neighbourhood</a>
+          </span>
+          {% if userEmail %}
+          <nav class="govuk-service-navigation__wrapper" aria-label="Account">
+            <ul class="govuk-service-navigation__list">
+              <li class="govuk-service-navigation__item">
+                <a href="/sign-out" class="govuk-service-navigation__link">Sign out</a>
+              </li>
+            </ul>
+          </nav>
+          {% endif %}
+        </div>
+      </div>
+    </nav>
+
+    <div class="govuk-phase-banner govuk-width-container">
+      <p class="govuk-phase-banner__content" style="display: flex; align-items: center; flex-wrap: wrap; gap: 5px 15px;">
+        <strong class="govuk-tag govuk-phase-banner__content__tag">ALPHA</strong>
+        <span class="govuk-phase-banner__text" style="flex: 1 1 auto;">
+          This is a prototype. Your feedback will help us improve it.
+          <a href="/admin" class="govuk-link" target="_blank" rel="noopener noreferrer" style="margin-left:15px;">Sessions</a>
+          <a href="/dashboard" class="govuk-link" target="_blank" rel="noopener noreferrer" style="margin-left:10px;">Dashboard</a>
+        </span>
+      </p>
+    </div>
+  </header>
+
+  <div class="govuk-width-container">
+    <main class="govuk-main-wrapper" id="main-content" role="main">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  <footer class="govuk-footer" role="contentinfo">
+    <div class="govuk-width-container">
+      <div class="govuk-footer__meta">
+        <div class="govuk-footer__meta-item govuk-footer__meta-item--grow">
+          <h2 class="govuk-visually-hidden">Support links</h2>
+          <span class="govuk-footer__licence-description">
+            Contains public sector information licensed under the
+            <a class="govuk-footer__link" href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/" rel="license">Open Government Licence v3.0</a>.
+            <a class="govuk-footer__link" href="/attribution">Attribution</a>.
+            This is an AI tool. Responses are not advice. You should verify data before relying on it.
+          </span>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+</body>
+</html>
