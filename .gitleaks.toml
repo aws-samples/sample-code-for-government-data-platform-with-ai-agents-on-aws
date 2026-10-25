@@ -1,0 +1,3 @@
+[allowlist]
+  description = "Suppressed gitleaks findings; add a fingerprint per finding, commit:path:rule:line"
+  fingerprints = []

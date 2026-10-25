@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "govdata-platform": {
+      "command": "uvx",
+      "args": [
+        "mcp-proxy-for-aws-cli@1.7.0",
+        "<gateway-url>",
+        "--service",
+        "bedrock-agentcore",
+        "--profile",
+        "<your-aws-profile>",
+        "--region",
+        "eu-west-2"
+      ],
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}

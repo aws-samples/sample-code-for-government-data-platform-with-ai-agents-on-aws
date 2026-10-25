@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en" class="govuk-template">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Ask Your Neighbourhood — Live</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/dashboard/govuk-built.css">
+  <style>
+    html, body { min-height: 100%; margin: 0; }
+    body { display: flex; flex-direction: column; font-family: "Inter", arial, sans-serif; }
+    .govuk-header__container { max-width: none; padding-left: 30px; }
+    .govuk-footer { flex-shrink: 0; padding: 8px 30px; font-size: 14px; }
+
+    /* Main 2-column layout */
+    .dash-main { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; flex: 1; padding: 20px 30px; min-height: 0; }
+    @media (max-width: 1024px) { .dash-main { grid-template-columns: 1fr; } }
+
+    /* Left column */
+    .left-col { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+
+    /* Stats cards — 3x2 grid */
+    .stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    .stat-card { border: 1px solid #b1b4b6; padding: 12px 14px; }
+    .stat-card-value { font-size: 32px; font-weight: 700; line-height: 1; color: #0b0c0c; }
+    .stat-card-label { font-size: 14px; color: #505a5f; margin-top: 4px; }
+
+    /* Activity cards */
+    .card { border: 1px solid #b1b4b6; padding: 14px 16px; }
+    .card-label { font-size: 14px; color: #505a5f; margin-top: 4px; }
+    .card-value { font-size: 17px; font-weight: 700; color: #0b0c0c; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .source-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+    .source-tag { background: #f3f2f1; color: #0b0c0c; font-size: 14px; font-weight: 600; padding: 3px 8px; }
+
+    /* Bottom row — response time + agent status side by side */
+    .bottom-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .response-value { font-size: 28px; font-weight: 700; color: #0b0c0c; }
+    .response-unit { font-size: 14px; color: #505a5f; }
+    .status-online { color: #00703c; font-size: 28px; font-weight: 700; }
+    .status-responding { color: #f47738; font-size: 28px; font-weight: 700; animation: pulse 1.5s ease-in-out infinite; }
+    .status-offline { color: #505a5f; font-size: 28px; font-weight: 700; }
+
+    /* Right column — chart */
+    .chart-col { border: 1px solid #b1b4b6; padding: 16px; display: flex; flex-direction: column; min-height: 420px; }
+    .chart-container { flex: 1; position: relative; min-height: 0; }
+    .chart-container canvas { position: absolute; top: 0; left: 0; width: 100% !important; height: 100% !important; }
+    .chart-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: #505a5f; font-size: 19px; }
+
+    .updated { font-size: 14px; color: #505a5f; text-align: right; padding: 0 30px 10px; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+  </style>
+</head>
+<body class="govuk-template__body" data-refresh-interval="{{ refreshInterval }}">
+  <header class="govuk-header">
+    <div class="govuk-header__container govuk-width-container">
+      <div class="govuk-header__logo">
+        <a href="/dashboard" style="display:flex;align-items:center;gap:14px;text-decoration:none !important;padding:10px 0;width:fit-content;">
+          <span style="color:white;font-size:28px;font-weight:700;letter-spacing:-0.5px;line-height:1;">PUB<span style="color:#00a1c9;">.</span>SEC</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="dash-main" id="main-content">
+    <h1 class="govuk-visually-hidden">Ask Your Neighbourhood live usage</h1>
+    <!-- Left column -->
+    <div class="left-col">
+      <!-- Stats cards 3x2 -->
+      <div class="stats-grid">
+        <section class="stat-card" aria-labelledby="l-questions"><div class="stat-card-value" id="s-questions">&mdash;</div><div class="stat-card-label" id="l-questions">Questions asked</div></section>
+        <section class="stat-card" aria-labelledby="l-sql"><div class="stat-card-value" id="s-sql">&mdash;</div><div class="stat-card-label" id="l-sql">SQL queries run</div></section>
+        <section class="stat-card" aria-labelledby="l-areas"><div class="stat-card-value" id="s-areas">&mdash;</div><div class="stat-card-label" id="l-areas">Areas explored</div></section>
+        <section class="stat-card" aria-labelledby="l-walkthroughs"><div class="stat-card-value" id="s-walkthroughs">&mdash;</div><div class="stat-card-label" id="l-walkthroughs">Walkthroughs</div></section>
+        <section class="stat-card" aria-labelledby="l-sources"><div class="stat-card-value" id="s-sources">&mdash;</div><div class="stat-card-label" id="l-sources">Data sources</div></section>
+        <section class="stat-card" aria-labelledby="l-rows"><div class="stat-card-value" id="s-rows">&mdash;</div><div class="stat-card-label" id="l-rows">Rows indexed</div></section>
+      </div>
+
+      <!-- Latest questions -->
+      <div class="card"><div class="card-value" id="live-question">&mdash;</div><div class="card-label">Latest data analyst question asked</div></div>
+      <div class="card"><div class="card-value" id="live-geo">&mdash;</div><div class="card-label">Latest geospatial question asked</div></div>
+      <div class="card"><div class="source-tags" id="live-sources"></div><div class="card-label">Latest data sources used</div></div>
+
+      <!-- Bottom row: response time + agent status -->
+      <div class="bottom-row">
+        <div class="card"><div><span class="response-value" id="live-response-time">&mdash;</span> <span class="response-unit">seconds</span></div><div class="card-label">Last response time</div></div>
+        <div class="card"><div id="agent-status"><span class="status-online">online</span></div><div class="card-label">Agent status</div></div>
+      </div>
+    </div>
+
+    <!-- Right column — chart -->
+    <section class="chart-col" aria-labelledby="l-chart">
+      <div class="card-label" id="l-chart" style="margin-bottom:8px;">Latest chart shared</div>
+      <div class="chart-container">
+        <canvas id="latest-chart"></canvas>
+        <div class="chart-empty" id="chart-empty">Waiting for first chart...</div>
+      </div>
+    </section>
+  </main>
+
+  <div class="updated" id="last-updated"></div>
+
+  <footer class="govuk-footer" role="contentinfo">
+    <div class="govuk-footer__meta">
+      <span class="govuk-footer__licence-description">
+        Contains public sector information licensed under the
+        <a class="govuk-footer__link" href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/" rel="license">Open Government Licence v3.0</a>.
+      </span>
+    </div>
+  </footer>
+
+  <script src="/dashboard/chart.js"></script>
+  <script>
+    var _chartInstance = null;
+    var _lastChartJson = '';
+
+    function fmt(n) {
+      if (n === null || n === undefined) return '\u2014';
+      if (typeof n === 'number' && n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+      if (typeof n === 'number' && n >= 10000) return (n / 1000).toFixed(0) + 'k';
+      return n.toLocaleString();
+    }
+
+    async function refresh() {
+      try {
+        var resp = await fetch('/dashboard/api/metrics');
+        if (!resp.ok) throw new Error('metrics ' + resp.status);
+        var data = await resp.json();
+        var m = data.metrics || {};
+        var c = data.coverage || {};
+        var live = data.live || {};
+
+        // Stats cards
+        document.getElementById('s-questions').textContent = fmt(m.total_questions_asked);
+        document.getElementById('s-sql').textContent = fmt(m.sql_queries_executed);
+        document.getElementById('s-areas').textContent = fmt(m.areas_explored);
+        document.getElementById('s-walkthroughs').textContent = fmt(m.walkthroughs);
+        document.getElementById('s-sources').textContent = fmt(c.data_sources);
+        document.getElementById('s-rows').textContent = fmt(c.total_rows);
+
+        // Agent status
+        var statusSpan = document.getElementById('agent-status').firstElementChild;
+        statusSpan.className = live.agent_status === 'responding' ? 'status-responding' : 'status-online';
+        statusSpan.textContent = live.agent_status === 'responding' ? 'responding' : 'online';
+
+        // Activity cards
+        if (live.last_question) {
+          document.getElementById('live-question').textContent = live.last_question;
+        }
+        if (live.last_area) {
+          document.getElementById('live-geo').textContent = live.last_area;
+        }
+
+        // Data sources as tags
+        var srcEl = document.getElementById('live-sources');
+        if (live.last_datasources && live.last_datasources.length) {
+          srcEl.innerHTML = '';
+          var sources = live.last_datasources.slice(0, 6);
+          for (var i = 0; i < sources.length; i++) {
+            var tag = document.createElement('span');
+            tag.className = 'source-tag';
+            tag.textContent = sources[i];
+            srcEl.appendChild(tag);
+          }
+          if (live.last_datasources.length > 6) {
+            var more = document.createElement('span');
+            more.className = 'source-tag';
+            more.textContent = '+' + (live.last_datasources.length - 6) + ' more';
+            srcEl.appendChild(more);
+          }
+        }
+
+        // Response time
+        if (live.last_response_ms) {
+          document.getElementById('live-response-time').textContent = (live.last_response_ms / 1000).toFixed(1);
+        }
+
+        // Chart
+        if (data.latest_chart) {
+          var chartJson = JSON.stringify(data.latest_chart);
+          if (chartJson !== _lastChartJson) {
+            _lastChartJson = chartJson;
+            document.getElementById('chart-empty').style.display = 'none';
+            var ctx = document.getElementById('latest-chart');
+            if (_chartInstance) _chartInstance.destroy();
+            var cfg = data.latest_chart;
+            cfg.options = cfg.options || {};
+            cfg.options.responsive = true;
+            cfg.options.maintainAspectRatio = false;
+            try { _chartInstance = new Chart(ctx, cfg); }
+            catch (chartErr) { _chartInstance = null; document.getElementById('chart-empty').style.display = ''; }
+          }
+        }
+
+        document.getElementById('last-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+      } catch (e) {
+        document.getElementById('last-updated').textContent = 'Metrics unavailable ' + new Date().toLocaleTimeString();
+      }
+    }
+
+    refresh();
+    setInterval(refresh, Number(document.body.dataset.refreshInterval) || 15000);
+  </script>
+</body>
+</html>

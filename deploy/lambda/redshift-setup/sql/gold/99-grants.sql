@@ -1,0 +1,6 @@
+GRANT USAGE ON SCHEMA gold TO PUBLIC;
+GRANT SELECT ON ALL TABLES IN SCHEMA gold TO PUBLIC;
+GRANT USAGE ON SCHEMA public TO PUBLIC;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO PUBLIC;
+-- Redshift gives PUBLIC CREATE on the public schema by default, which would let a SELECT INTO from the gateway create tables
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;

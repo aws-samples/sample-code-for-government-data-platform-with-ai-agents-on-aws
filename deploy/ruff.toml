@@ -1,0 +1,10 @@
+# Ruff linter config for deploy/ directory
+# S (security) rules excluded — Bandit handles security scanning out-of-band
+# Glue scripts import inside functions or after job setup where Spark must start first
+
+[lint]
+select = ["E", "F"]
+ignore = ["E501"]
+
+[lint.per-file-ignores]
+"**/glue/*.py" = ["E402"]

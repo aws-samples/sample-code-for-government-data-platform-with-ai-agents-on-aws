@@ -1,0 +1,23 @@
+{
+  "name": "govdata-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "build:css": "sass govuk.scss govuk-built.css --style=compressed --no-source-map"
+  },
+  "devDependencies": {
+    "sass": "1.105.1"
+  },
+  "dependencies": {
+    "@aws-sdk/client-ssm": "3.1152.0",
+    "@aws-sdk/credential-provider-node": "3.972.86",
+    "@smithy/protocol-http": "5.6.2",
+    "@smithy/signature-v4": "5.7.4",
+    "aws-jwt-verify": "5.2.1",
+    "chart.js": "4.5.1",
+    "express": "5.3.0",
+    "govuk-frontend": "6.6.0",
+    "nunjucks": "3.2.4"
+  }
+}

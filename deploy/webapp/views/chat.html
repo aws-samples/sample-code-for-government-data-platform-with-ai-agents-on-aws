@@ -1,0 +1,760 @@
+{% extends "layout.html" %}
+
+{% block title %}Ask Your Neighbourhood{% endblock %}
+
+{% block content %}
+<style>
+  .chat-layout { max-width: 960px; }
+  .chat-entry { margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid #b1b4b6; }
+  .chat-entry:last-of-type { border-bottom: none; }
+  .chat-question { border-left: 10px solid #b1b4b6; padding: 15px 0 15px 15px; margin-bottom: 15px; }
+  .chat-question p { margin: 0; }
+  .chat-response { min-height: 40px; font-family: arial, sans-serif; font-size: 19px; line-height: 1.5; }
+  .chat-response h1, .chat-response h2, .chat-response h3 { font-weight: 700; }
+  .chat-response p { margin-bottom: 15px; }
+  .chat-response ul, .chat-response ol { margin-bottom: 15px; padding-left: 20px; }
+  .chat-response table { border-collapse: collapse; width: 100%; margin-bottom: 20px; font-size: 16px; }
+  .chat-response img { max-width: 100%; height: auto; border: 1px solid #b1b4b6; margin: 15px 0; border-radius: 2px; }
+  .chat-response th, .chat-response td { border: 1px solid #b1b4b6; padding: 10px; text-align: left; }
+  .chat-response th { background: #f3f2f1; font-weight: 700; }
+  .sidebar-item { display: block; padding: 4px 0; font-size: 14px; }
+  .sidebar-item:hover { color: #1d70b8; }
+  .chat-loading { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+  .chat-visual { max-width: 700px; margin: 20px 0; }
+  .chat-loading svg { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+
+<div class="chat-layout">
+    <details class="govuk-details" id="question-nav" style="display:none;">
+      <summary class="govuk-details__summary">
+        <span class="govuk-details__summary-text">Questions in this session</span>
+      </summary>
+      <div class="govuk-details__text">
+        <div id="sidebar-list"></div>
+      </div>
+    </details>
+
+    <div id="welcome" class="govuk-!-margin-bottom-6">
+      {% if walkthrough %}
+      <h1 class="govuk-heading-xl">How this was built</h1>
+      <p class="govuk-body-l">This platform collects data from {{ sources | length }} UK government sources, cleans and joins it, and makes it available to query in plain English.</p>
+      <img id="walkthrough-diagram" src="/static/diagrams/architecture-overview.png" alt="Platform architecture diagram" style="max-width:100%;border:1px solid #b1b4b6;border-radius:2px;margin:15px 0;">
+      <p class="govuk-body">The diagram shows the platform sitting between {{ sources | length }} government data sources and the people who use them — analysts, civil servants, and citizens. Instead of each user group finding and downloading data separately, everything is available in one place.</p>
+      <p class="govuk-body govuk-!-font-weight-bold">Choose a layer to explore:</p>
+      <div class="govuk-!-margin-bottom-4" id="subpath-static">
+        <button type="button" class="govuk-button govuk-button--secondary govuk-!-margin-right-1 govuk-!-margin-bottom-1" onclick="swapDiagram('walkthrough-ingestion.png'); startSubpath('Data ingestion — how we pull from 25+ government APIs into S3 and Iceberg')">1. Data ingestion</button>
+        <button type="button" class="govuk-button govuk-button--secondary govuk-!-margin-right-1 govuk-!-margin-bottom-1" onclick="swapDiagram('walkthrough-transformation.png'); startSubpath('Data transformation — the medallion architecture, bronze to silver to gold')">2. Transformation</button>
+        <button type="button" class="govuk-button govuk-button--secondary govuk-!-margin-right-1 govuk-!-margin-bottom-1" onclick="swapDiagram('walkthrough-analytics.png'); startSubpath('Analytics and serving — Redshift Serverless, materialised views, cross-dataset queries')">3. Analytics</button>
+        <button type="button" class="govuk-button govuk-button--secondary govuk-!-margin-right-1 govuk-!-margin-bottom-1" onclick="swapDiagram('walkthrough-ai.png'); startSubpath('AI and natural language — Bedrock AgentCore, Strands agents, tool-use patterns')">4. AI layer</button>
+      </div>
+      <p class="govuk-body"><a href="/" class="govuk-link">Back to home</a></p>
+      {% else %}
+      <h1 class="govuk-heading-xl">Explore UK government data</h1>
+      <p class="govuk-body-l">Ask questions about local authorities across England and Wales.</p>
+      <div class="govuk-inset-text">
+        Answers draw on official UK government data, brought together in a single platform.
+      </div>
+      {% endif %}
+
+      <details class="govuk-details">
+        <summary class="govuk-details__summary">
+          <span class="govuk-details__summary-text">Available data sources</span>
+        </summary>
+        <div class="govuk-details__text">
+          <ul class="govuk-list govuk-list--bullet">
+            {% for source in sources %}
+            <li>
+              {% if source.api_url %}<a href="{{ source.api_url }}" class="govuk-link" target="_blank" rel="noopener noreferrer">{{ source.name }}</a>{% else %}{{ source.name }}{% endif %} {# nosemgrep: template-href-var — URL from trusted DynamoDB data source registry, not user input #}
+              {% if source.min_year and source.max_year %}
+                <br><span class="govuk-body-s" style="color:#505a5f;margin:0;">
+                  {%- if source.min_year == source.max_year -%}
+                    {{ source.min_year }}
+                  {%- else -%}
+                    {{ source.min_year }} to {{ source.max_year }}
+                  {%- endif -%}
+                  {%- if source.row_count %}, {{ source.row_count | numberFormat }} rows{% endif -%}
+                </span>
+              {% elif source.update_frequency %}
+                <br><span class="govuk-body-s" style="color:#505a5f;margin:0;">Updated {{ source.update_frequency }}</span>
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+      </details>
+    </div>
+
+    <div id="conversation"></div>
+
+    <div id="input-area">
+      <div class="govuk-form-group">
+        <label class="govuk-label govuk-label--m" for="prompt" id="prompt-label">
+          What would you like to know?
+        </label>
+        <textarea class="govuk-textarea" id="prompt" name="prompt" rows="3"></textarea>
+      </div>
+      <button type="button" class="govuk-button" id="send-btn">{% if walkthrough %}Ask{% else %}Search{% endif %}</button>
+      <button type="button" class="govuk-button govuk-button--secondary govuk-!-margin-left-1" id="cancel-btn" style="display:none;">Cancel</button>
+      <button type="button" class="govuk-button govuk-button--secondary govuk-!-margin-left-1" id="continue-btn" style="display:none;">Continue</button>
+      <button type="button" class="govuk-button govuk-button--secondary govuk-!-margin-left-1" id="top-btn" {% if walkthrough %}style="display:none;"{% endif %} onclick="document.getElementById('main-content').scrollIntoView({behavior:'smooth'})">Back to top</button>
+      <button type="button" class="govuk-button govuk-button--secondary govuk-!-margin-left-1" id="location-btn" {% if walkthrough %}style="display:none;"{% endif %}>Use my location</button>
+    </div>
+
+    <div id="example-questions" class="govuk-!-margin-top-4"></div>
+    <p id="model-info" class="govuk-body-s govuk-!-margin-top-4" style="color:#505a5f;display:none;"></p>
+
+    {% if not walkthrough %}
+    <div id="scenario-cards">
+    <h2 class="govuk-heading-m govuk-!-margin-top-6">Try a scenario</h2>
+    <div style="display:flex;flex-wrap:wrap;gap:15px;margin-bottom:20px;">
+      <div style="flex: 1 1 calc(33.333% - 10px); max-width: calc(33.333% - 10px); min-width: 250px; border:1px solid #b1b4b6;border-left:5px solid #1d70b8;padding:15px;box-sizing:border-box;display:flex;flex-direction:column;">
+        <strong class="govuk-tag govuk-tag--blue govuk-!-margin-bottom-2" style="font-size:.75rem;">Solution Architect</strong>
+        <h3 class="govuk-heading-s govuk-!-margin-bottom-1">How this was built</h3>
+        <p class="govuk-body-s govuk-!-margin-bottom-4" style="color:#505a5f;flex:1;">Architecture walkthrough: ingestion, ETL, analytics, and AI on AWS.</p>
+        <a href="/walkthrough/chat?scenario=1" class="govuk-button govuk-!-margin-bottom-0" role="button">Load scenario</a>
+      </div>
+      <div style="flex: 1 1 calc(33.333% - 10px); max-width: calc(33.333% - 10px); min-width: 250px; border:1px solid #b1b4b6;border-left:5px solid #00703c;padding:15px;box-sizing:border-box;display:flex;flex-direction:column;">
+        <strong class="govuk-tag govuk-tag--green govuk-!-margin-bottom-2" style="font-size:.75rem;">Geospatial Analyst</strong>
+        <h3 class="govuk-heading-s govuk-!-margin-bottom-1">Explore area</h3>
+        <p class="govuk-body-s govuk-!-margin-bottom-4" style="color:#505a5f;flex:1;">Satellite imagery analysis — vegetation, water, burn scars, thermal.</p>
+        <a href="/satellite" class="govuk-button govuk-!-margin-bottom-0" role="button">Load scenario</a>
+      </div>
+      <div style="flex: 1 1 calc(33.333% - 10px); max-width: calc(33.333% - 10px); min-width: 250px; border:1px solid #b1b4b6;border-left:5px solid #f47738;padding:15px;box-sizing:border-box;display:flex;flex-direction:column;">
+        <strong class="govuk-tag govuk-tag--orange govuk-!-margin-bottom-2" style="font-size:.75rem;">Policy Adviser</strong>
+        <h3 class="govuk-heading-s govuk-!-margin-bottom-1">Briefing a minister</h3>
+        <p class="govuk-body-s govuk-!-margin-bottom-4" style="color:#505a5f;flex:1;">Assemble a local authority evidence pack in minutes, not days.</p>
+        <a href="/walkthrough/chat?scenario=2" class="govuk-button govuk-!-margin-bottom-0" role="button">Load scenario</a>
+      </div>
+
+    </div>
+    </div>
+    {% endif %}
+</div>
+
+<script src="/assets/marked.umd.js"></script>
+<script src="/assets/purify.min.js"></script>
+<script src="/assets/chart.umd.min.js"></script>
+<link rel="stylesheet" href="/assets/maplibre-gl.css" />
+<script type="module" src="/static/maplibre-loader.mjs"></script>
+<script src="/static/govmap.js"></script>
+<!-- nosemgrep: insecure-document-method — all innerHTML assignments sanitised via DOMPurify -->
+<script>
+// nosemgrep: insecure-document-method — all innerHTML assignments sanitised via DOMPurify
+function sanitise(html) { if (typeof DOMPurify === 'undefined') throw new Error('DOMPurify not loaded'); return DOMPurify.sanitize(html, { ADD_TAGS: ['canvas'], ADD_ATTR: ['id', 'style', 'class', 'target', 'rel'] }); }
+// Model-written links that open a new tab get rel=noopener
+if (typeof DOMPurify !== 'undefined') DOMPurify.addHook('afterSanitizeAttributes', function(node) { if (node.tagName === 'A' && node.getAttribute('target') === '_blank') node.setAttribute('rel', 'noopener noreferrer'); });
+(function() {
+  var sessionId = '{{ sessionId }}';
+  var walkthroughMode = {{ 'true' if walkthrough else 'false' }};
+  var walkthroughScenario = '{{ scenario | default("") }}';
+  var conversation = document.getElementById('conversation');
+  var promptEl = document.getElementById('prompt');
+  var sendBtn = document.getElementById('send-btn');
+  var cancelBtn = document.getElementById('cancel-btn');
+  var sidebarList = document.getElementById('sidebar-list');
+  var welcome = document.getElementById('welcome');
+  var questionCount = 0;
+  var chartCount = 0;
+  var abortController = null;
+  var isStreaming = false;
+  var messageHistory = [];
+  var continueBtn = document.getElementById('continue-btn');
+  var lastNextHint = 'Continue';
+  // Fetched once; the model doesn't change between answers
+  var modelId = '';
+  fetch('/model-info').then(function(r) { return r.json(); }).then(function(data) { modelId = data.model_id || ''; }).catch(function() {});
+
+  // Walkthrough: one stage on screen at a time. Called when a stage's diagram arrives, and again when the answer finishes
+  function hideEarlierEntries() {
+    for (var qi = 1; qi < questionCount; qi++) {
+      var prevEntry = document.getElementById('q-' + qi);
+      if (prevEntry) prevEntry.style.display = 'none';
+      var prevLink = document.getElementById('sidebar-' + qi);
+      if (prevLink) prevLink.style.display = 'none';
+    }
+  }
+
+  function addQuestion(text, hideQuestion) {
+    questionCount++;
+    var entryId = 'q-' + questionCount;
+
+    // Hide welcome on first question, show question nav
+    if (questionCount === 1) {
+      welcome.style.display = 'none';
+      document.getElementById('example-questions').style.display = 'none';
+      var scenarioCards = document.getElementById('scenario-cards');
+      if (scenarioCards) scenarioCards.style.display = 'none';
+      document.getElementById('question-nav').style.display = '';
+    }
+
+    // Update prompt label for follow-ups
+    document.getElementById('prompt-label').textContent = walkthroughMode ? 'Ask a question or click Continue' : 'Ask a follow-up question';
+
+    // Add to sidebar — show raw question initially, AI title replaces it after response
+    var short = text.length > 50 ? text.slice(0, 50) + '…' : text;
+    if (hideQuestion) short = 'Walkthrough';
+    var link = document.createElement('a');
+    link.href = '#' + entryId;
+    link.className = 'govuk-link sidebar-item';
+    link.id = 'sidebar-' + questionCount;
+    link.textContent = short;
+    sidebarList.appendChild(link);
+
+    // Add to conversation. Auto-start triggers (e.g. "Start scenario N") are sent
+    // to the agent but hidden from the transcript so users never see the raw trigger.
+    var entry = document.createElement('div');
+    entry.className = 'chat-entry';
+    entry.id = entryId;
+    var questionHtml = hideQuestion
+      ? ''
+      : '<div class="chat-question"><p class="govuk-body govuk-!-font-weight-bold">' + escHtml(text) + '</p></div>';
+    entry.innerHTML = sanitise(questionHtml
+      + '<div class="chat-response" id="resp-' + questionCount + '">'
+      + '<div class="chat-loading" id="loading-' + questionCount + '" role="status" aria-live="polite"><svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" stroke="#1d70b8" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg><span class="govuk-body">Searching government data...</span></div>'
+      + '</div>');
+    conversation.appendChild(entry);
+    entry.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    return questionCount;
+  }
+
+  // Status line labels per tool; the spinner shows these instead of the model narrating what it is about to do
+  var TOOL_LABELS = {
+    run_sql: 'Querying the data', describe_schema: 'Reading the schema', summarise_area: 'Building the area profile',
+    create_chart: 'Drawing a chart', create_map: 'Drawing a map', create_choropleth: 'Drawing a map',
+    get_uk_facts: 'Looking up national figures', get_platform_facts: 'Reading the platform facts'
+  };
+
+  // Tag lines the agent emits for the UI, never shown as text
+  function isTagLine(line) {
+    var t = line.trim();
+    return /^\*{0,2}(FOLLOWUP|NEXT|DIAGRAM):/.test(t);
+  }
+  function stripTags(text) {
+    return text.split('\n').filter(function(l) { return !isTagLine(l); }).join('\n').trim();
+  }
+
+  function streamResponse(prompt, qNum) {
+    var responseEl = document.getElementById('resp-' + qNum);
+    var loadingEl = document.getElementById('loading-' + qNum);
+    var statusEl = loadingEl.querySelector('span');
+    var startTime = Date.now();
+    var queryId = '';
+    var chartConfigs = [];
+    var mapConfigs = [];
+    // One block per AG-UI part, in arrival order. A text block is interim until RUN_FINISHED confirms it as the answer.
+    var currentText = null;
+    var answerText = '';
+    var renderQueued = false;
+    isStreaming = true;
+    abortController = new AbortController();
+    sendBtn.style.display = 'none';
+    cancelBtn.style.display = '';
+    if (walkthroughMode) continueBtn.style.display = 'none';
+
+    messageHistory.push({ role: 'user', content: prompt });
+
+    // Keep history lean — in walkthrough mode, only send last 4 exchanges
+    // (8 messages) to avoid context window overflow from long multi-step demos
+    var historyToSend = messageHistory;
+    if (walkthroughMode && messageHistory.length > 8) {
+      historyToSend = messageHistory.slice(-8);
+    }
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+      loadingEl.style.display = 'flex';
+      // The status line stays below everything rendered so far
+      responseEl.appendChild(loadingEl);
+    }
+
+    // Renders the open text block once per frame; marked.parse on every delta stutters on long answers
+    function scheduleRender() {
+      if (renderQueued) return;
+      renderQueued = true;
+      requestAnimationFrame(function() {
+        renderQueued = false;
+        if (currentText) currentText.el.innerHTML = sanitise(marked.parse(stripTags(currentText.raw)));
+      });
+    }
+
+    function openText() {
+      var el = document.createElement('div');
+      el.className = 'chat-text';
+      responseEl.insertBefore(el, loadingEl);
+      currentText = { el: el, raw: '' };
+    }
+
+    // A text message is interim when a tool call follows it: the block goes and its first line becomes the status
+    function closeTextAsInterim() {
+      if (!currentText) return;
+      var firstLine = stripTags(currentText.raw).split('\n')[0];
+      currentText.el.remove();
+      currentText = null;
+      if (firstLine) setStatus(firstLine.replace(/[*_`#]/g, '').slice(0, 120));
+    }
+
+    function addVisual(el) {
+      responseEl.insertBefore(el, loadingEl);
+    }
+
+    fetch('/query-stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: prompt, session_id: sessionId, messages: historyToSend, mode: walkthroughMode ? 'walkthrough' : '' }),
+      signal: abortController.signal
+    }).then(function(response) {
+      if (!response.ok) {
+        if (response.status === 401) { window.location.href = '/auth/login?returnTo=' + encodeURIComponent(window.location.pathname + window.location.search); return; }
+        throw new Error(response.status === 429 ? 'Too many requests. Wait a minute and try again.' : 'The service returned ' + response.status);
+      }
+      var reader = response.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+
+      function read() {
+        reader.read().then(function(result) {
+          if (result.done) { finish(); return; }
+          buffer += decoder.decode(result.value, { stream: true });
+          var lines = buffer.split('\n');
+          buffer = lines.pop();
+
+          for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            if (!line.startsWith('data: ')) continue;
+            var data;
+            try { data = JSON.parse(line.substring(6)); } catch (e) { console.debug('Unparseable event', line.slice(0, 80)); continue; }
+            var eventType = data.type || '';
+
+            if (eventType === 'RUN_ERROR') {
+              loadingEl.remove();
+              responseEl.innerHTML = sanitise('<div class="govuk-error-summary"><h2 class="govuk-error-summary__title">Something went wrong</h2><div class="govuk-error-summary__body"><p class="govuk-body">' + (data.message || 'Unknown error') + '</p></div></div>');
+              finish(); return;
+            }
+            if (eventType === 'RUN_FINISHED') { finish(); return; }
+            if (eventType === 'RUN_STARTED') { setStatus('Starting agent'); }
+
+            if (eventType === 'TEXT_MESSAGE_START') { openText(); }
+            if (eventType === 'TEXT_MESSAGE_CONTENT' && data.delta) {
+              if (!currentText) openText();
+              currentText.raw += data.delta;
+              loadingEl.style.display = 'none';
+              scheduleRender();
+              // Agent-driven diagram swap via DIAGRAM: tag
+              if (walkthroughMode && typeof swapDiagram === 'function') {
+                var dm = currentText.raw.match(/^DIAGRAM:([a-z0-9-]+\.png)$/m);
+                if (dm && currentText.diagram !== dm[1]) { currentText.diagram = dm[1]; swapDiagram(dm[1]); hideEarlierEntries(); }
+              }
+            }
+            if (eventType === 'TEXT_MESSAGE_END' && currentText) {
+              // Stays open until the next event says whether it was interim (tool call) or the answer (run finished)
+              currentText.ended = true;
+            }
+
+            if (eventType === 'TOOL_CALL_START' && data.toolCallName) {
+              closeTextAsInterim();
+              setStatus(TOOL_LABELS[data.toolCallName] || ('Using ' + data.toolCallName.replace(/_/g, ' ')));
+            }
+
+            if (eventType === 'CUSTOM') {
+              // A tool-written section: text that stays, rendered where it arrives
+              if (data.name === 'section' && typeof data.value === 'string') {
+                closeTextAsInterim();
+                var sectionEl = document.createElement('div');
+                sectionEl.className = 'chat-text chat-section';
+                sectionEl.innerHTML = sanitise(marked.parse(data.value));
+                addVisual(sectionEl);
+                loadingEl.style.display = 'none';
+              }
+              if (data.name === 'chart' && data.value) {
+                chartConfigs.push(JSON.parse(JSON.stringify(data.value)));
+                chartCount++;
+                var canvasId = 'chart-' + chartCount;
+                var wrapper = document.createElement('div');
+                wrapper.className = 'chat-visual';
+                wrapper.setAttribute('data-block', String(chartConfigs.length - 1));
+                wrapper.innerHTML = sanitise('<canvas id="' + canvasId + '"></canvas>');
+                addVisual(wrapper);
+                new Chart(document.getElementById(canvasId), data.value);
+              }
+              if (data.name === 'map' && data.value) {
+                mapConfigs.push(JSON.parse(JSON.stringify(data.value)));
+                var mapHolder = document.createElement('div');
+                mapHolder.className = 'chat-map';
+                mapHolder.setAttribute('data-block', String(mapConfigs.length - 1));
+                addVisual(mapHolder);
+                renderMap(data.value, mapHolder);
+              }
+              if (data.name === 'query_id' && data.value) { queryId = data.value; }
+              // A guardrail block: everything streamed so far is replaced by the guardrail's message
+              if (data.name === 'guardrail' && data.value && data.value.message) {
+                responseEl.querySelectorAll('.chat-text, .chat-visual, .chat-map').forEach(function(el) { el.remove(); });
+                chartConfigs = [];
+                mapConfigs = [];
+                openText();
+                currentText.raw = data.value.message;
+                scheduleRender();
+                loadingEl.style.display = 'none';
+              }
+            }
+          }
+          read();
+        });
+      }
+      read();
+    }).catch(function(err) {
+      if (err.name === 'AbortError') {
+        isStreaming = false;
+        loadingEl.remove();
+        return;
+      }
+      loadingEl.remove();
+      responseEl.innerHTML = sanitise('<div class="govuk-error-summary"><h2 class="govuk-error-summary__title">Something went wrong</h2><div class="govuk-error-summary__body"><p class="govuk-body">' + escHtml(err.message) + '</p></div></div>');
+    });
+
+    function finish() {
+      isStreaming = false;
+      loadingEl.remove();
+      // The text block open at the end of the run is the answer
+      answerText = currentText ? currentText.raw : '';
+      if (currentText) { currentText.el.innerHTML = sanitise(marked.parse(stripTags(answerText))); currentText = null; }
+
+      if (answerText) {
+        var historyContent = answerText.length > 3000 ? answerText.substring(0, 3000) + '\n[...truncated]' : answerText;
+        messageHistory.push({ role: 'assistant', content: historyContent });
+      }
+      sendBtn.style.display = '';
+      cancelBtn.style.display = 'none';
+
+      // FOLLOWUP: and NEXT: lines from the answer
+      var followups = [];
+      answerText.split('\n').forEach(function(raw) {
+        var l = raw.trim();
+        if (/^\*{0,2}FOLLOWUP:/.test(l)) followups.push(l.replace(/^\*{0,2}FOLLOWUP:\*{0,2}\s*/, '').trim());
+        else if (/^\*{0,2}NEXT:/.test(l)) lastNextHint = l.replace(/^\*{0,2}NEXT:\*{0,2}\s*/, '').trim();
+      });
+      var cleanText = stripTags(answerText);
+
+      // Walkthrough: sub-path buttons or Continue
+      var buttonDriven = walkthroughScenario === '4';
+      if (walkthroughMode) {
+        var hasSubPathMenu = cleanText.indexOf('Data ingestion') > -1 && cleanText.indexOf('AI and natural language') > -1;
+        if (hasSubPathMenu) {
+          var btnArea = document.getElementById('subpath-buttons');
+          if (!btnArea) {
+            btnArea = document.createElement('div');
+            btnArea.id = 'subpath-buttons';
+            btnArea.className = 'govuk-!-margin-top-2 govuk-!-margin-bottom-4';
+            continueBtn.parentNode.insertBefore(btnArea, continueBtn);
+          }
+          btnArea.innerHTML = '';
+          for (var si = 1; si <= 4; si++) {
+            var sb = document.createElement('button');
+            sb.type = 'button';
+            sb.className = 'govuk-button govuk-button--secondary govuk-!-margin-right-1';
+            sb.textContent = si;
+            sb.style.minWidth = '44px';
+            sb.setAttribute('data-subpath', si);
+            sb.addEventListener('click', function() {
+              var spBtnArea = document.getElementById('subpath-buttons');
+              if (spBtnArea) spBtnArea.style.display = 'none';
+              promptEl.value = this.getAttribute('data-subpath');
+              submit();
+            });
+            btnArea.appendChild(sb);
+          }
+          btnArea.style.display = '';
+          continueBtn.style.display = 'none';
+        } else {
+          var spBtns = document.getElementById('subpath-buttons');
+          if (spBtns) spBtns.style.display = 'none';
+          continueBtn.style.display = buttonDriven ? 'none' : '';
+        }
+        hideEarlierEntries();
+      }
+
+      // Per-question elapsed time + share link
+      var elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      var metaEl = document.createElement('p');
+      metaEl.className = 'govuk-body-s govuk-!-margin-top-4';
+      metaEl.style.color = '#505a5f';
+      metaEl.innerHTML = sanitise(elapsed + 's &nbsp;·&nbsp; <a href="#" class="govuk-link share-link" data-qnum="' + qNum + '">Share this answer</a>');
+      responseEl.appendChild(metaEl);
+
+      // Share click handler — captures current Q&A content
+      var shareLink = metaEl.querySelector('.share-link');
+      shareLink.addEventListener('click', function(e) {
+        e.preventDefault();
+        var link = this;
+        link.textContent = 'Saving…';
+        // The answer in page order: text blocks and visuals as they were rendered
+        var blocks = [];
+        responseEl.querySelectorAll('.chat-text, .chat-visual, .chat-map').forEach(function(el) {
+          if (el.classList.contains('chat-text')) blocks.push({ type: 'text', html: el.innerHTML });
+          else if (el.classList.contains('chat-visual')) blocks.push({ type: 'chart', config: chartConfigs[Number(el.getAttribute('data-block'))] });
+          else blocks.push({ type: 'map', config: mapConfigs[Number(el.getAttribute('data-block'))] });
+        });
+        var answerHtml = blocks.filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.html; }).join('\n');
+
+        fetch('/share', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            question: prompt,
+            answer_html: answerHtml,
+            blocks: blocks,
+            charts: chartConfigs,
+            maps: mapConfigs,
+            datasets: JSON.parse(link.getAttribute('data-datasets') || '[]')
+          })
+        }).then(function(r) { return r.json(); }).then(function(data) {
+          if (data.url) {
+            link.textContent = 'Link copied';
+            link.href = data.url;
+            link.target = '_blank';
+            var fullUrl = window.location.origin + data.url;
+            navigator.clipboard.writeText(fullUrl).catch(function() {
+              link.textContent = fullUrl;
+            });
+          } else {
+            link.textContent = 'Share failed';
+          }
+        }).catch(function() { link.textContent = 'Share failed'; });
+      });
+
+      function appendFollowups() {
+        if (followups.length > 0) {
+          var fDiv = document.createElement('div');
+          fDiv.className = 'govuk-!-margin-top-4';
+          fDiv.innerHTML = sanitise('<p class="govuk-body-s" style="color:#505a5f;">Follow-up questions:</p>');
+          followups.forEach(function(q) {
+            var a = document.createElement('a');
+            a.href = '#';
+            a.className = 'govuk-link govuk-body-s';
+            a.style.display = 'block';
+            a.style.marginBottom = '5px';
+            a.textContent = q;
+            a.onclick = function(e) { e.preventDefault(); promptEl.value = this.textContent; submit(); };
+            fDiv.appendChild(a);
+          });
+          responseEl.appendChild(fDiv);
+        }
+      }
+
+      function appendSampleQuestions() {
+        if (window._sampleQuestionsData) {
+          var sq = _buildSampleQuestionsDropdown(window._sampleQuestionsData);
+          responseEl.appendChild(sq);
+        }
+      }
+
+      // Collapsible datasets used (second), then follow-ups (last)
+      var sharedDatasets = [];
+      if (queryId) {
+        fetch('/dataset-metadata/' + encodeURIComponent(queryId))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.datasets && data.datasets.length > 0) {
+            sharedDatasets = data.datasets;
+            // Update the share link's dataset payload
+            if (shareLink) shareLink.setAttribute('data-datasets', JSON.stringify(data.datasets));
+            var listItems = data.datasets.map(function(d) {
+              var label = d.api_url ? '<a href="' + d.api_url + '" class="govuk-link" target="_blank" rel="noopener noreferrer">' + d.name + '</a>' : d.name;
+              return '<li>' + label + '</li>';
+            }).join('');
+            var statements = [];
+            data.datasets.forEach(function(d) {
+              (d.attribution || []).forEach(function(s) { if (statements.indexOf(s) === -1) statements.push(s); });
+            });
+            var attribution = statements.length ? '<p class="govuk-body-s">' + statements.join('<br>') + ' <a href="/attribution" class="govuk-link">Attribution</a></p>' : '';
+            var details = document.createElement('details');
+            details.className = 'govuk-details govuk-!-margin-top-2';
+            details.innerHTML = sanitise('<summary class="govuk-details__summary"><span class="govuk-details__summary-text">Datasets used</span></summary><div class="govuk-details__text"><ul class="govuk-list govuk-list--bullet">' + listItems + '</ul>' + attribution + '</div>');
+            responseEl.appendChild(details);
+          }
+          appendSampleQuestions();
+          appendFollowups();
+        }).catch(function() { appendSampleQuestions(); appendFollowups(); });
+      } else {
+        appendSampleQuestions();
+        appendFollowups();
+      }
+
+      // Model + session info footer
+      if (modelId) {
+        document.getElementById('model-info').textContent = 'Model: ' + modelId + ' | ' + elapsed + 's | Session: ' + sessionId;
+        document.getElementById('model-info').style.display = '';
+      }
+      var nearBottom = (window.innerHeight + window.scrollY) >= (document.body.scrollHeight - 200);
+      if (nearBottom) promptEl.focus();
+
+      // Walkthrough: add inline Continue or end-of-walkthrough nav after response
+      if (walkthroughMode && !buttonDriven) {
+        var walkthroughEnded = lastNextHint === 'END';
+        var navDiv = document.createElement('div');
+        navDiv.className = 'govuk-!-margin-top-4';
+        if (walkthroughEnded) {
+          // Walkthrough finished — show navigation links
+          navDiv.innerHTML = '<p class="govuk-body govuk-!-margin-bottom-2">What next?</p>'
+            + '<a href="/walkthrough" class="govuk-button govuk-button--secondary govuk-!-margin-right-2">Try another scenario</a>'
+            + '<a href="/" class="govuk-button govuk-button--secondary">Explore freely</a>';
+        } else {
+          // Mid-walkthrough — show inline Continue button
+          var contBtn = document.createElement('button');
+          contBtn.type = 'button';
+          contBtn.className = 'govuk-button';
+          contBtn.textContent = 'Continue';
+          contBtn.addEventListener('click', function() {
+            this.parentNode.style.display = 'none';
+            promptEl.value = lastNextHint;
+            submit();
+          });
+          navDiv.appendChild(contBtn);
+        }
+        responseEl.appendChild(navDiv);
+        // Hide the fixed Continue button — inline one takes over
+        continueBtn.style.display = 'none';
+      }
+    }
+  }
+
+  function escHtml(str) {
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
+  }
+
+  function submit(opts) {
+    opts = opts || {};
+    var text = promptEl.value.trim();
+    if (!text || isStreaming) return;
+    promptEl.value = '';
+    var qNum = addQuestion(text, opts.hideQuestion);
+    streamResponse(text, qNum);
+  }
+
+  sendBtn.addEventListener('click', submit);
+  cancelBtn.addEventListener('click', function() {
+    if (abortController) abortController.abort();
+    isStreaming = false;
+    sendBtn.style.display = '';
+    cancelBtn.style.display = 'none';
+    // Hide all loading spinners — there's one per question, querySelector only finds the first
+    document.querySelectorAll('.chat-loading').forEach(function(el) { el.style.display = 'none'; });
+    // Tell AgentCore to stop the session so the next request doesn't get "concurrent invocations"
+    fetch('/cancel-agent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, mode: walkthroughMode ? 'walkthrough' : '' })
+    }).then(function(r) { return r.json(); }).catch(function() {});
+  });
+
+  // Continue button for walkthrough mode — sends the NEXT: context from last response
+  continueBtn.addEventListener('click', function() {
+    promptEl.value = lastNextHint;
+    submit();
+  });
+  promptEl.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
+  });
+
+  // Location button
+  document.getElementById('location-btn').addEventListener('click', function() {
+    var btn = this;
+    btn.textContent = 'Finding your area...';
+    btn.disabled = true;
+    if (!navigator.geolocation) { btn.textContent = 'Location not supported'; btn.disabled = false; return; }
+    navigator.geolocation.getCurrentPosition(function(pos) {
+      fetch('/nearest-area?lat=' + pos.coords.latitude + '&lng=' + pos.coords.longitude)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          btn.disabled = false;
+          if (data.area_name) { promptEl.value = 'Summarise ' + data.area_name; submit(); btn.textContent = 'Use my location'; }
+          else { btn.textContent = 'Area not found'; }
+        }).catch(function() { btn.textContent = 'Error'; btn.disabled = false; });
+    }, function() { btn.textContent = 'Location denied'; btn.disabled = false; });
+  });
+
+  // Example questions — rendered as GOV.UK details dropdown with categories
+  window._sampleQuestionsData = null;
+  function _buildSampleQuestionsDropdown(data) {
+    var details = document.createElement('details');
+    details.className = 'govuk-details govuk-!-margin-top-2';
+    var summary = document.createElement('summary');
+    summary.className = 'govuk-details__summary';
+    summary.innerHTML = sanitise('<span class="govuk-details__summary-text">Sample questions</span>');
+    details.appendChild(summary);
+    var body = document.createElement('div');
+    body.className = 'govuk-details__text';
+    if (data.categories) {
+      data.categories.forEach(function(cat) {
+        var heading = document.createElement('p');
+        heading.className = 'govuk-body-s govuk-!-font-weight-bold govuk-!-margin-bottom-1 govuk-!-margin-top-3';
+        heading.textContent = cat.name;
+        body.appendChild(heading);
+        cat.questions.forEach(function(q) {
+          var a = document.createElement('a');
+          a.href = '#';
+          a.className = 'govuk-link govuk-body-s';
+          a.style.display = 'block';
+          a.style.marginBottom = '5px';
+          a.textContent = q;
+          a.onclick = function(e) { e.preventDefault(); promptEl.value = this.textContent; details.removeAttribute('open'); submit(); };
+          body.appendChild(a);
+        });
+      });
+    }
+    details.appendChild(body);
+    return details;
+  }
+
+  fetch('/example-questions').then(function(r) { return r.json(); }).then(function(data) {
+    window._sampleQuestionsData = data;
+    document.getElementById('example-questions').appendChild(_buildSampleQuestionsDropdown(data));
+  }).catch(function() {});
+
+  // Swap the walkthrough diagram image and show it in the chat area
+  window.swapDiagram = function(filename) {
+    // Scenario 2 (ministerial briefing) shows no architecture diagrams
+    if (walkthroughScenario === '2') return;
+    var img = document.getElementById('walkthrough-diagram');
+    if (img) img.src = '/static/diagrams/' + filename;
+    // Also inject the diagram at the top of the conversation
+    var chatArea = document.getElementById('conversation');
+    if (chatArea) {
+      var existing = document.getElementById('walkthrough-diagram-chat');
+      if (existing) existing.remove();
+      if (!/^[a-z0-9-]+\.png$/.test(filename)) return;
+      var div = document.createElement('div');
+      div.id = 'walkthrough-diagram-chat';
+      div.style.marginBottom = '20px';
+      var diagramImg = document.createElement('img');
+      diagramImg.src = '/static/diagrams/' + filename;
+      diagramImg.alt = 'Architecture diagram';
+      diagramImg.style.cssText = 'max-width:100%;border:1px solid #b1b4b6;border-radius:2px;';
+      div.appendChild(diagramImg);
+      chatArea.insertBefore(div, chatArea.firstChild);
+    }
+  };
+
+  // Start a walkthrough sub-path from the static intro buttons
+  window.startSubpath = function(text) {
+    var ids = ['subpath-static', 'evidence-queries', 'family-queries'];
+    ids.forEach(function(id) { var el = document.getElementById(id); if (el) el.style.display = 'none'; });
+    promptEl.value = text;
+    submit();
+  };
+
+  // Auto-start walkthrough mode; scenario 1 has a static intro with its own buttons
+  if (walkthroughMode && walkthroughScenario && walkthroughScenario !== '1') {
+    document.getElementById('example-questions').style.display = 'none';
+    welcome.style.display = 'none';
+    setTimeout(function() {
+      promptEl.value = 'Start scenario ' + walkthroughScenario;
+      submit({ hideQuestion: true });
+    }, 500);
+  }
+})();
+</script>
+{% endblock %}

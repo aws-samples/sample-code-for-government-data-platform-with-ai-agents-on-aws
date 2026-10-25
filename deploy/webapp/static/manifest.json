@@ -1,0 +1,9 @@
+{
+  "name": "Ask Your Neighbourhood",
+  "short_name": "GovData",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0b0c0c"
+}
