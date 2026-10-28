@@ -102,8 +102,43 @@ resource "aws_sfn_state_machine" "etl_to_gold" {
 
   definition = jsonencode({
     Comment = "Detect bronze changes, then if there is work: warm up Redshift, the bronze-to-silver jobs, silver-to-gold and the Redshift refresh for the changed tables, the Redshift gold views"
-    StartAt = "DetectChanges"
+    StartAt = "ListRunning"
     States = {
+      # Two runs at once would share the rs_*__new names and the gold Glue job (concurrency 1), so only the oldest RUNNING execution carries on. The one that stands down leaves its bronze unprocessed for the next run
+      ListRunning = {
+        Type          = "Task"
+        QueryLanguage = "JSONata"
+        Resource      = "arn:aws:states:::aws-sdk:sfn:listExecutions"
+        Arguments = {
+          StateMachineArn = "arn:aws:states:${var.Region}:${data.aws_caller_identity.current.account_id}:stateMachine:${var.PrefixCode}-sfn-etl-to-gold"
+          StatusFilter    = "RUNNING"
+        }
+        # ListExecutions returns newest first, so the last item is the oldest running execution
+        Assign = { oldestRunning = "{% $states.result.Executions[-1].ExecutionArn %}" }
+        Output = "{% $states.input %}"
+        Retry  = [local.lambda_retry]
+        Next   = "AmOldest"
+        # The guard covers a rare collision and must not be able to stop the daily run: on error carry on as if alone
+        Catch = [{
+          ErrorEquals = ["States.ALL"]
+          Output      = "{% $states.input %}"
+          Next        = "DetectChanges"
+        }]
+      }
+
+      AmOldest = {
+        Type          = "Choice"
+        QueryLanguage = "JSONata"
+        Choices = [
+          { Condition = "{% $oldestRunning = $states.context.Execution.Id %}", Next = "DetectChanges" },
+        ]
+        Default = "AlreadyRunning"
+      }
+
+      AlreadyRunning = {
+        Type = "Succeed"
+      }
+
       # Input {"full": true} rebuilds every table, as do a fresh deployment and a new source
       DetectChanges = {
         Type     = "Task"
@@ -262,10 +297,11 @@ resource "aws_sfn_state_machine" "etl_to_gold" {
         TimeoutSeconds = 960
         Retry          = [local.lambda_retry]
         Next           = "RedshiftGold"
+        # A failed refresh leaves the previous rs_* objects in place, so the area views are still rebuilt from them before the run is failed
         Catch = [{
           ErrorEquals = ["States.ALL"]
-          ResultPath  = "$.error"
-          Next        = "Failed"
+          ResultPath  = "$.refresh_error"
+          Next        = "RedshiftGold"
         }]
       }
 
@@ -293,6 +329,11 @@ resource "aws_sfn_state_machine" "etl_to_gold" {
         Type = "Choice"
         Choices = [
           {
+            Variable  = "$.refresh_error"
+            IsPresent = true
+            Next      = "RedshiftRefreshFailed"
+          },
+          {
             Variable  = "$.gold_error"
             IsPresent = true
             Next      = "SilverToGoldFailed"
@@ -310,6 +351,12 @@ resource "aws_sfn_state_machine" "etl_to_gold" {
         Type      = "Fail"
         Error     = "SilverToGoldFailed"
         CausePath = "$.gold_error.Cause"
+      }
+
+      RedshiftRefreshFailed = {
+        Type      = "Fail"
+        Error     = "RedshiftRefreshFailed"
+        CausePath = "$.refresh_error.Cause"
       }
 
       BronzeToSilverFailed = {
@@ -379,39 +426,28 @@ resource "aws_iam_role_policy" "sfn_etl_to_gold" {
         Effect   = "Allow"
         Action   = ["glue:StartJobRun", "glue:GetJobRun", "glue:GetJobRuns", "glue:BatchStopJobRun"]
         Resource = "arn:aws:glue:${var.Region}:${data.aws_caller_identity.current.account_id}:job/${var.PrefixCode}-glue-*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["states:ListExecutions"]
+        Resource = "arn:aws:states:${var.Region}:${data.aws_caller_identity.current.account_id}:stateMachine:${var.PrefixCode}-sfn-etl-to-gold"
       }
     ])
   })
 }
 
-# ETL at 05:00 UTC, Monday to Saturday: rebuilds only the sources with new bronze data, or nothing
+# ETL at 05:00 UTC daily: picks up sources run by hand and anything an ingest-triggered run missed. Nothing is rebuilt when there is no new bronze
 resource "aws_scheduler_schedule" "etl_to_gold_daily" {
   name        = "${var.PrefixCode}-schedule-etl-to-gold"
   group_name  = "default"
   kms_key_arn = aws_kms_key.datalake.arn
 
   flexible_time_window { mode = "OFF" }
-  schedule_expression = "cron(0 5 ? * MON-SAT *)"
+  schedule_expression = "cron(0 5 ? * * *)"
 
   target {
     arn      = aws_sfn_state_machine.etl_to_gold.arn
     role_arn = aws_iam_role.eventbridge_scheduler.arn
     input    = "{}"
-  }
-}
-
-# Sunday 05:00 UTC: rebuilds every table, which applies changed gold and refresh code and repairs a failed run
-resource "aws_scheduler_schedule" "etl_to_gold_weekly_full" {
-  name        = "${var.PrefixCode}-schedule-etl-to-gold-full"
-  group_name  = "default"
-  kms_key_arn = aws_kms_key.datalake.arn
-
-  flexible_time_window { mode = "OFF" }
-  schedule_expression = "cron(0 5 ? * SUN *)"
-
-  target {
-    arn      = aws_sfn_state_machine.etl_to_gold.arn
-    role_arn = aws_iam_role.eventbridge_scheduler.arn
-    input    = jsonencode({ full = true })
   }
 }

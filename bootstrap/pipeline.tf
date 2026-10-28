@@ -572,6 +572,30 @@ resource "aws_iam_role_policy" "pipeline" {
         Resource = "*"
       },
       {
+        Sid      = "RefreshChangedSql"
+        Effect   = "Allow"
+        Action   = ["lambda:InvokeFunction"]
+        Resource = "arn:aws:lambda:${var.aws_region}:${local.account_id}:function:${var.prefix_code}-lambda-redshift-setup"
+      },
+      {
+        Sid      = "RefreshChangedSqlDiff"
+        Effect   = "Allow"
+        Action   = ["codecommit:GetDifferences"]
+        Resource = aws_codecommit_repository.main.arn
+      },
+      {
+        Sid      = "RefreshChangedSqlFullEtl"
+        Effect   = "Allow"
+        Action   = ["states:StartExecution"]
+        Resource = "arn:aws:states:${var.aws_region}:${local.account_id}:stateMachine:${var.prefix_code}-sfn-etl-to-gold"
+      },
+      {
+        Sid      = "RefreshChangedSqlLastCommit"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter", "ssm:PutParameter"]
+        Resource = "arn:aws:ssm:${var.aws_region}:${local.account_id}:parameter/${var.prefix_code}/deploy/last-commit"
+      },
+      {
         Sid      = "SmokeCognitoConfig"
         Effect   = "Allow"
         Action   = ["ssm:GetParameter"]
@@ -650,6 +674,7 @@ resource "aws_codepipeline" "main" {
       version          = "1"
       output_artifacts = ["SourceCode"]
       configuration    = local.source_action.configuration
+      namespace        = "SourceVariables"
     }
   }
 
@@ -746,6 +771,21 @@ resource "aws_codepipeline" "main" {
           { name = "SOFT_FAIL", value = "false", type = "PLAINTEXT" },
         ])
       }
+    }
+
+    # Refreshes the Redshift objects whose SQL changed since the last deploy, so a SQL change takes effect with the deploy rather than at the next full ETL run
+    action {
+      name            = "refresh-changed-sql"
+      category        = "Compute"
+      owner           = "AWS"
+      provider        = "Commands"
+      version         = "1"
+      run_order       = 2
+      input_artifacts = ["SourceCode"]
+
+      commands = [
+        "bash -c 'set -e; yum install -y -q python3.12 python3.12-pip && python3.12 -m pip install -q boto3==1.43.114 && PREV=$(aws ssm get-parameter --name /${var.prefix_code}/deploy/last-commit --query Parameter.Value --output text 2>/dev/null || echo \"\") && AWS_REGION=${var.aws_region} PREFIX_CODE=${var.prefix_code} python3.12 scripts/refresh_changed_sql.py \"$PREV\" \"#{SourceVariables.CommitId}\" && aws ssm put-parameter --name /${var.prefix_code}/deploy/last-commit --type String --overwrite --value \"#{SourceVariables.CommitId}\"'",
+      ]
     }
   }
 

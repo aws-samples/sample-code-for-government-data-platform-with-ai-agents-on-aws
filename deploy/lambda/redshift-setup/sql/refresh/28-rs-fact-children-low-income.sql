@@ -1,4 +1,4 @@
-CREATE MATERIALIZED VIEW rs_fact_children_low_income AS
+CREATE TABLE rs_fact_children_low_income AS
 SELECT
     geography_code::VARCHAR(20),
     la_name::VARCHAR(200),

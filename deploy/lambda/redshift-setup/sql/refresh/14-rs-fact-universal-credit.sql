@@ -1,4 +1,4 @@
-CREATE MATERIALIZED VIEW rs_fact_universal_credit AS
+CREATE TABLE rs_fact_universal_credit AS
 SELECT
     geography_code::VARCHAR(20),
     la_name::VARCHAR(200),

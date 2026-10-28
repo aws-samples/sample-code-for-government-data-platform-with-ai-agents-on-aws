@@ -26,11 +26,14 @@ app = BedrockAgentCoreApp()
 _region = os.environ["AWS_DEFAULT_REGION"]
 _MAX_HISTORY = 20
 
-# A blocked answer is replaced, in the history and on the page, by GUARDRAIL_MESSAGE
+# A blocked answer is replaced by GUARDRAIL_MESSAGE; only the newest question is screened and a blocked one is redacted from the history, or every later turn re-trips the filter
 _GUARDRAIL = {
     "guardrail_id": os.environ.get("BEDROCK_GUARDRAIL_ID") or None,
     "guardrail_version": os.environ.get("BEDROCK_GUARDRAIL_VERSION") or None,
     "guardrail_stream_processing_mode": "async",
+    "guardrail_latest_message": True,
+    "guardrail_redact_input": True,
+    "guardrail_redact_input_message": "[Question blocked by the guardrail]",
     "guardrail_redact_output": True,
     "guardrail_redact_output_message": GUARDRAIL_MESSAGE,
 }

@@ -1,4 +1,4 @@
-CREATE MATERIALIZED VIEW rs_fact_trade AS
+CREATE TABLE rs_fact_trade AS
 SELECT
     month_id::INT,
     period_yyyymm::INT,

@@ -1,4 +1,4 @@
-CREATE MATERIALIZED VIEW rs_fact_wellbeing AS
+CREATE TABLE rs_fact_wellbeing AS
 SELECT
     geography_code::VARCHAR(20),
     measure::VARCHAR(100),

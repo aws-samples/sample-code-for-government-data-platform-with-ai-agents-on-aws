@@ -1,5 +1,5 @@
 
-CREATE MATERIALIZED VIEW rs_fact_births_deaths AS
+CREATE TABLE rs_fact_births_deaths AS
 SELECT
     geography_code::VARCHAR(20),
     geography_name::VARCHAR(200),

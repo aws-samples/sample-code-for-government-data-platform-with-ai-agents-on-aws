@@ -1,5 +1,5 @@
 
-CREATE MATERIALIZED VIEW rs_fact_la_spending AS
+CREATE TABLE rs_fact_la_spending AS
 SELECT
     geography_code::VARCHAR(20),
     la_name::VARCHAR(200),

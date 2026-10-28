@@ -100,7 +100,7 @@ Superseded geography codes:
 ## Remove a data source
 
 1. Reverse the steps above, then grep for the source's names to confirm nothing is left. Also remove the source's sample questions from `deploy/webapp/server.js` and `deploy/webapp/views/chat.html`. The browser smoke test (`tests/browser_smoke_test.py`) only needs changing if you remove deprivation.
-2. Push, then run the ETL Step Function with the input `{"full": true}`, or wait for the Sunday full run. Its refresh step drops every `rs_*` and `mv_*` object and rebuilds from the SQL files, which removes the table.
+2. Push. The deploy sees the deleted refresh file and runs a full refresh, which drops the `rs_*` object. Or run the ETL Step Function with the input `{"full": true}`.
 3. Delete the leftover gold and silver tables and the registry item. The silver table name is the one the Glue script wrote.
    ```bash
    aws s3tables delete-table --table-bucket-arn arn:aws:s3tables:${AWS_REGION}:${ACCOUNT_ID}:bucket/${PREFIX_CODE}-datalake-gold-${ACCOUNT_ID} --namespace gold --name fact_<name> --profile $AWS_PROFILE --region $AWS_REGION
@@ -124,31 +124,32 @@ export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
 Workgroup `{prefix}-workgroup`, database `analytics`.
 
-Gold tables in Amazon S3 Tables are read through the Spectrum external schema `gold`, which points at the Glue resource link `{prefix}_gold_s3tables`. Each `rs_*` object is a materialized view over `gold.*`, apart from `rs_fact_hpi` and `rs_fact_nhs_ods`, which are CTAS tables. The `mv_*` views join the `rs_*` objects. All of them are stored in Redshift.
+Gold tables in Amazon S3 Tables are read through the Spectrum external schema `gold`, which points at the Glue resource link `{prefix}_gold_s3tables`. Each `rs_*` object is a CTAS table over `gold.*`. The `mv_*` views join the `rs_*` objects. All of them are stored in Redshift.
 
 Actions:
 
 - `warmup`: runs `SELECT 1` to wake the workgroup.
-- `refresh`: drops every `rs_*` and `mv_*` object in `public` (listed from `SVV_MV_INFO` and `pg_tables`), recreates the `gold` external schema, runs `sql/refresh/` in file order, then grants.
+- `refresh`: build then swap. Recreates the `gold` external schema (full refresh only), builds every `rs_*` object in scope under a `__new` name in one transaction, drops the `mv_*` views, then swaps each object into place in its own transaction (drop old, rename new) and grants. A failed build leaves the previous objects untouched. Objects left by a removed source, and any `__new` leftover from a failed swap, are dropped on the next full refresh.
 - `gold` (the default): creates the external schema if missing, rebuilds the views in `sql/gold/06`–`08`, then grants.
 
-Any other action raises an error. For a full rebuild, run `refresh` then `gold`, as the ETL Step Function does. A failed SQL statement also raises, after the rest of the run completes. In `refresh`, an `rs_*` object whose gold table isn't loaded yet (`EntityNotFoundException` or `relation ... does not exist`) is created as an empty stand-in table, logged as `STAND-IN`, and doesn't fail the run. In `gold`, a view that can't find an `rs_*` object fails the run, except on a fresh deployment before the first refresh.
+Any other action raises an error. For a full rebuild, run `refresh` then `gold`, as the ETL Step Function does. A failed SQL statement also raises, after the rest of the run completes. In `refresh`, an `rs_*` object whose gold table isn't loaded yet is created as an empty stand-in table, logged as `STAND-IN`, and doesn't fail the run. The stand-in is decided before the refresh runs, from the tables Spectrum can see in `SVV_EXTERNAL_TABLES`. In `gold`, a view that can't find an `rs_*` object fails the run, except on a fresh deployment before the first refresh.
 
 ### ETL Step Function (`{prefix}-sfn-etl-to-gold`)
 
-Runs at 05:00 UTC Monday to Saturday (`{prefix}-schedule-etl-to-gold`), as a full run at 05:00 UTC on Sunday (`{prefix}-schedule-etl-to-gold-full`, input `{"full": true}`), and on demand.
+Runs at 05:00 UTC daily (`{prefix}-schedule-etl-to-gold`) as a safety net, after each scheduled ingest finishes (started by `{prefix}-sfn-ingest-all`), and on demand.
 
-1. DetectChanges: on a fresh deployment, queues every `{prefix}-glue-bronze-to-silver-*` job. Otherwise it queues registry sources whose bronze files are newer than `silver_last_processed`, plus any `{prefix}-glue-bronze-to-silver-*` job with no registry item yet (a newly added source). It also returns the scope: full on a fresh deployment, a new source or `{"full": true}`, otherwise the queued sources' `gold_tables` from the registry plus the dimensions.
-2. AnyWork: ends the run when nothing is queued and it isn't full. Gold and Redshift are left as they are.
-3. WarmupRedshift: wakes the workgroup. A failure here continues to the next state.
-4. AnyChanges: skips to SilverToGold when no job is queued (a full run with nothing new).
-5. RunBronzeToSilver: runs the queued Glue jobs, five at a time. A failed job is recorded and the run continues. A successful one has its `silver_last_processed` stamped by `mark-silver-processed`.
-6. SilverToGold: the dimensional model job with `--TABLES` from the scope (`all` on a full run), which also writes the registry. It sets `silver_last_processed` only on a source's first build. It fails at the end if any table failed, after committing the ones that built.
-7. RedshiftRefresh: `action=refresh` with the scope's `rs_*` objects, or every object on a full run. Runs even if SilverToGold failed.
-8. RedshiftGold: `action=gold`.
-9. CheckFailures: fails the run if SilverToGold failed or any bronze-to-silver job failed, naming the failed sources.
+1. ListRunning and AmOldest: only the oldest RUNNING execution carries on; a newer one ends at AlreadyRunning without touching anything. Two runs at once would share the `rs_*__new` names and the gold Glue job, which allows one run. The bronze the newer run was started for is picked up by the next run.
+2. DetectChanges: on a fresh deployment, queues every `{prefix}-glue-bronze-to-silver-*` job. Otherwise it queues registry sources whose bronze files are newer than `silver_last_processed`, plus any `{prefix}-glue-bronze-to-silver-*` job with no registry item yet (a newly added source). It also returns the scope: full on a fresh deployment, a new source or `{"full": true}`, otherwise the queued sources' `gold_tables` from the registry plus the dimensions.
+3. AnyWork: ends the run when nothing is queued and it isn't full. Gold and Redshift are left as they are.
+4. WarmupRedshift: wakes the workgroup. A failure here continues to the next state.
+5. AnyChanges: skips to SilverToGold when no job is queued (a full run with nothing new).
+6. RunBronzeToSilver: runs the queued Glue jobs, five at a time. A failed job is recorded and the run continues. A successful one has its `silver_last_processed` stamped by `mark-silver-processed`.
+7. SilverToGold: the dimensional model job with `--TABLES` from the scope (`all` on a full run), which also writes the registry. It sets `silver_last_processed` only on a source's first build. It fails at the end if any table failed, after committing the ones that built.
+8. RedshiftRefresh: `action=refresh` with the scope's `rs_*` objects, or every object on a full run. Runs even if SilverToGold failed. A failure is recorded and the run continues to RedshiftGold.
+9. RedshiftGold: `action=gold`.
+10. CheckFailures: fails the run if RedshiftRefresh failed, SilverToGold failed or any bronze-to-silver job failed, naming the failed sources.
 
-A change to the gold build or the refresh SQL reaches the data at the Sunday full run, or straight away with `{"full": true}`. A source whose gold build failed in a scoped run is rebuilt on Sunday.
+A change to the refresh SQL is applied by the deploy; a change to the gold build starts a full run from the deploy. A source whose gold build failed in a scoped run is retried by the next run that finds new bronze, or by hand with `{"full": true}`.
 
 ### API keys
 

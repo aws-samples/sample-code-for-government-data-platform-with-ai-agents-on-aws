@@ -1,4 +1,4 @@
-CREATE MATERIALIZED VIEW rs_fact_deprivation AS
+CREATE TABLE rs_fact_deprivation AS
 SELECT
     geography_code::VARCHAR(20),
     la_code::VARCHAR(20),

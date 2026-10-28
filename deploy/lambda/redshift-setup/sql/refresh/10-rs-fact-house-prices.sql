@@ -1,4 +1,4 @@
-CREATE MATERIALIZED VIEW rs_fact_house_prices AS
+CREATE TABLE rs_fact_house_prices AS
 SELECT
     geography_code::VARCHAR(20),
     district::VARCHAR(200),

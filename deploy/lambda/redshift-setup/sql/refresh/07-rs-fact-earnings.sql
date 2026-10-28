@@ -1,4 +1,4 @@
-CREATE MATERIALIZED VIEW rs_fact_earnings AS
+CREATE TABLE rs_fact_earnings AS
 SELECT
     geography_code::VARCHAR(20),
     sex::VARCHAR(20),

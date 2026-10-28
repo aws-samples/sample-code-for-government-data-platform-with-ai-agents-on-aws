@@ -1,4 +1,4 @@
-CREATE MATERIALIZED VIEW rs_fact_school_detail AS
+CREATE TABLE rs_fact_school_detail AS
 SELECT
     school_urn::VARCHAR(20),
     school_name::VARCHAR(300),

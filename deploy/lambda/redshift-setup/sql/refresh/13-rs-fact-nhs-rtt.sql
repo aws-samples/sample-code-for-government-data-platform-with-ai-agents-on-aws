@@ -1,4 +1,4 @@
-CREATE MATERIALIZED VIEW rs_fact_nhs_rtt AS
+CREATE TABLE rs_fact_nhs_rtt AS
 SELECT
     calendar_year::INT,
     month_name::VARCHAR(20),

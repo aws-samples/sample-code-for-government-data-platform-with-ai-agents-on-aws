@@ -1,5 +1,5 @@
 
-CREATE MATERIALIZED VIEW rs_fact_business_counts AS
+CREATE TABLE rs_fact_business_counts AS
 SELECT
     geography_code::VARCHAR(20),
     geography_name::VARCHAR(200),

@@ -69,7 +69,7 @@ locals {
       workgroup     = aws_redshiftserverless_workgroup.main.workgroup_name
       database      = aws_redshiftserverless_namespace.main.db_name
       serving_views = ["mv_area_overview", "mv_area_timeseries", "mv_uk_summary"]
-      read_path     = "S3 Tables gold, read through Redshift Spectrum via a Glue external schema into rs_* materialised views stored in Redshift, then joined into mv_* materialised views for area profiles, timeseries and the UK summary"
+      read_path     = "S3 Tables gold, read through Redshift Spectrum via a Glue external schema into rs_* tables stored in Redshift, then joined into mv_* materialised views for area profiles, timeseries and the UK summary"
       warmup        = var.RedshiftWarmupEnabled ? "EventBridge Scheduler keeps RPUs warm Mon-Fri 8am-6pm UTC" : "off; the workgroup wakes on first query"
     }
 

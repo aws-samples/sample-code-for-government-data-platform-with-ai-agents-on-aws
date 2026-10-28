@@ -265,6 +265,7 @@ module "redshift_setup" {
       Effect = "Allow"
       Action = [
         "redshift-data:ExecuteStatement",
+        "redshift-data:BatchExecuteStatement",
         "redshift-data:DescribeStatement",
         "redshift-data:GetStatementResult",
         "redshift-data:CancelStatement"

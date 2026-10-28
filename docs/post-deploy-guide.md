@@ -115,14 +115,13 @@ All times are UTC. EventBridge Scheduler runs them, defined in Terraform.
 
 | Schedule | Resource | Cron | Notes |
 |----------|----------|------|-------|
-| ETL | `sfn-etl-to-gold` | `0 5 ? * MON-SAT *` | Rebuilds only the sources with new bronze data, or nothing |
-| ETL, full | `sfn-etl-to-gold` with `{"full": true}` | `0 5 ? * SUN *` | Rebuilds every table |
+| ETL | `sfn-etl-to-gold` | `0 5 ? * * *` | Safety net: rebuilds sources with new bronze that no ingest-triggered run processed |
 | Redshift warmup | `redshift-setup` (warmup) | `0/4 8-17 ? * MON-FRI *` | Off by default. `SELECT 1` every 4 minutes to keep RPUs warm when `RedshiftWarmupEnabled = true`. The RPU-hours are billed |
 | Ingest sources | `schedule-ingest-<key>` | `schedule` in `local.ingest_sources` | 14 sources at 06:00 UTC, a few days after each publisher's release. Each source's registry item records its cron as `ingest_schedule` |
 
-Ingestion schedules run on their own. The ETL picks up new bronze data through change detection.
+Each scheduled ingest starts the ETL for its source when it finishes, so new data is usually in the warehouse within the hour. The daily ETL picks up anything that run missed, through change detection.
 
-Terraform runs the Redshift setup Lambda once, on the first deploy, before any data is loaded. After that, only the ETL state machine rebuilds the `rs_*` and `mv_*` objects. A deploy that changes the gold build or the SQL files takes effect at the Sunday full run. To rebuild straight away, start a full run:
+Terraform runs the Redshift setup Lambda once, on the first deploy, before any data is loaded. After that, only the ETL state machine rebuilds the `rs_*` and `mv_*` objects. A deploy that changes a refresh or gold SQL file refreshes those objects as its last step. A change to the gold build starts a full ETL run. To rebuild everything by hand, start a full run:
 
 ```bash
 aws stepfunctions start-execution \

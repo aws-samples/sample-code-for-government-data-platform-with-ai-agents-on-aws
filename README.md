@@ -133,7 +133,7 @@ The push starts the pipeline. Follow its progress at the `pipeline_console_url` 
 | Source | Pulls the pushed commit from CodeCommit | Stops |
 | Validate | Runs tflint, `terraform fmt` and `terraform validate` | Stops |
 | Build | Runs `terraform apply` on `deploy/terraform-live`, then builds five container images in parallel (agent, walkthrough, geospatial, webapp, dashboard) | The apply is allowed to fail. On a fresh account the agent runtimes point at images that don't exist yet |
-| Deploy | Runs `terraform apply` again with the new image tags | Stops |
+| Deploy | Runs `terraform apply` again with the new image tags, then refreshes any Redshift object whose SQL changed | Stops |
 | Test | Runs the browser smoke test, `tests/browser_smoke_test.py --audit` | Allowed to fail |
 
 A pipeline run takes about 10 minutes.

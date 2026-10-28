@@ -1,4 +1,4 @@
-CREATE MATERIALIZED VIEW rs_fact_crime AS
+CREATE TABLE rs_fact_crime AS
 SELECT
     category::VARCHAR(100),
     month::VARCHAR(10),

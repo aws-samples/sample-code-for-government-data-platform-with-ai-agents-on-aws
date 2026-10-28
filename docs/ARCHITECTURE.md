@@ -64,7 +64,7 @@ Amazon Redshift Serverless is the SQL engine the agents query. The workgroup `{p
 Data reaches Redshift in three hops.
 
 1. Redshift Spectrum reads the gold S3 Tables through an external schema. The schema uses an AWS Glue resource link to the `s3tablescatalog` federated catalog.
-2. A materialized view named `rs_*` stores a typed copy of each gold table in Redshift. Two, `rs_fact_hpi` and `rs_fact_nhs_ods`, are `CREATE TABLE AS SELECT` (CTAS) tables instead.
+2. A table named `rs_*` stores a typed copy of each gold table in Redshift, built with `CREATE TABLE AS SELECT`. A refresh builds each new object under a temporary name and swaps it in one transaction, so a failed refresh leaves the previous data in place.
 3. Materialized views named `mv_*` join the `rs_*` objects for the queries the agents run most.
 
 Both `rs_*` and `mv_*` are stored in Redshift. Spectrum only reads S3 Tables during the refresh step. Day-to-day agent queries never leave Redshift.
@@ -95,7 +95,7 @@ The ETL state machine calls `refresh` then `gold`, which is a full rebuild.
 
 ### Ingestion
 
-An AWS Step Functions state machine, `{prefix}-sfn-ingest-all`, runs every source. It takes a list of sources, or `{"sources": ["all"]}` for all of them. A Map state runs up to 5 sources at a time. A failure in one source doesn't block the others.
+An AWS Step Functions state machine, `{prefix}-sfn-ingest-all`, runs every source. It takes a list of sources, or `{"sources": ["all"]}` for all of them. A Map state runs up to 5 sources at a time. A failure in one source doesn't block the others. When a scheduled ingest finishes, it starts the ETL for the sources that landed.
 
 ```mermaid
 flowchart LR
@@ -140,17 +140,18 @@ The ETL state machine, `{prefix}-sfn-etl-to-gold`, runs the sequence end to end.
 
 | Step | What it does |
 |---|---|
-| 1 | Detects which bronze sources changed since the last run, plus any new source not built yet. If nothing changed, the run ends here |
-| 2 | Warms up Redshift with a `SELECT 1` |
-| 3 | Runs the changed bronze-to-silver Glue jobs in parallel |
-| 4 | Runs the silver-to-gold job for the changed sources' tables and the dimensions |
-| 5 | Calls redshift-setup with `refresh` for those tables' `rs_*` objects |
-| 6 | Calls redshift-setup with `gold` |
-| 7 | Fails the run if any Glue job in steps 3 or 4 failed |
+| 1 | Checks it is the oldest running execution. A newer one ends here, because two runs would share the `rs_*__new` names and the gold Glue job; its bronze is picked up by the next run |
+| 2 | Detects which bronze sources changed since the last run, plus any new source not built yet. If nothing changed, the run ends here |
+| 3 | Warms up Redshift with a `SELECT 1` |
+| 4 | Runs the changed bronze-to-silver Glue jobs in parallel |
+| 5 | Runs the silver-to-gold job for the changed sources' tables and the dimensions |
+| 6 | Calls redshift-setup with `refresh` for those tables' `rs_*` objects |
+| 7 | Calls redshift-setup with `gold` |
+| 8 | Fails the run if any Glue job in steps 4 or 5, or the refresh in step 6, failed |
 
-A full run rebuilds every table and every `rs_*` object. It happens on a fresh deployment, when a new source is added, and on the weekly schedule. The weekly run picks up changes to the gold build and the refresh SQL, and repairs a run that failed during the week.
+A full run rebuilds every table and every `rs_*` object. It happens on a fresh deployment, when a new source is added, and when the state machine is started with `{"full": true}`.
 
-Steps 5 and 6 run in order because the `mv_*` views depend on the `rs_*` objects. They also run when a Glue job failed. Redshift then picks up the tables that did build, and step 7 marks the run as failed. A failed bronze-to-silver job keeps its old `silver_last_processed` timestamp, and the next run queues it again.
+Steps 6 and 7 run in order because the `mv_*` views depend on the `rs_*` objects. They also run when a Glue job failed. Step 7 also runs when step 6 failed, which keeps the area views in place. Redshift then picks up the tables that did build, and step 7 marks the run as failed. A failed bronze-to-silver job keeps its old `silver_last_processed` timestamp, and the next run queues it again.
 
 ### Writing to Amazon S3 Tables
 
@@ -296,7 +297,7 @@ The [README](../README.md) covers the deployment steps. Two design points are wo
 
 Bootstrap's Terraform state lives on the machine that applied it. Only that machine can change or remove the pipeline, and its `terraform destroy` has to run locally because a pipeline can't delete the role it runs as.
 
-The deploy pipeline applies the platform twice. The agent runtimes reference container images that don't exist on a fresh account. The first apply is allowed to fail, the build stage pushes the images, and the second apply completes against them.
+The deploy pipeline applies the platform twice. The agent runtimes reference container images that don't exist on a fresh account. The first apply is allowed to fail, the build stage pushes the images, and the second apply completes against them. The Deploy stage then refreshes any Redshift object whose SQL changed in the commit, so a SQL change takes effect with the deploy.
 
 ## Future considerations
 

@@ -183,7 +183,19 @@ resource "aws_sfn_state_machine" "ingest_all" {
       AnyFailed = {
         Type    = "Choice"
         Choices = [{ Variable = "$.failed[0]", IsPresent = true, Next = "SourcesFailed" }]
-        Default = "Done"
+        Default = "StartEtl"
+      }
+      # Fire and forget: the ETL scopes itself to the sources that just landed, and its own run reports any failure
+      StartEtl = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::states:startExecution"
+        Parameters = {
+          StateMachineArn = "arn:aws:states:${var.Region}:${data.aws_caller_identity.current.account_id}:stateMachine:${var.PrefixCode}-sfn-etl-to-gold"
+          Input           = "{}"
+        }
+        ResultPath = null
+        Next       = "Done"
+        Catch      = [{ ErrorEquals = ["States.ALL"], ResultPath = "$.etl_start_error", Next = "Done" }]
       }
       SourcesFailed = {
         Type      = "Fail"
@@ -232,6 +244,11 @@ resource "aws_iam_role_policy" "sfn_ingest_all" {
         Effect   = "Allow"
         Action   = ["lambda:InvokeFunction"]
         Resource = concat([module.ingest_router.function_arn], [for s in values(local.ingest_sources) : s.arn if s.type == "lambda"])
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["states:StartExecution"]
+        Resource = "arn:aws:states:${var.Region}:${data.aws_caller_identity.current.account_id}:stateMachine:${var.PrefixCode}-sfn-etl-to-gold"
       },
       {
         Effect   = "Allow"

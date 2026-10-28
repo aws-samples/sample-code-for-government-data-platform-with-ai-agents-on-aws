@@ -1,4 +1,4 @@
-CREATE MATERIALIZED VIEW rs_dim_time AS
+CREATE TABLE rs_dim_time AS
 SELECT
     period_yyyymm::INT,
     calendar_year::INT,
